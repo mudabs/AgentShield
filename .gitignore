@@ -17,6 +17,10 @@
 /.next/
 /out/
 
+# hardhat build output
+/artifacts/
+/cache/
+
 # production
 /build
 

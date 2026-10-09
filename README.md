@@ -1,36 +1,110 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AgentShield
 
-## Getting Started
+AgentShield is a trust and security layer for autonomous AI agents making payments on Monad. The product goal is:
 
-First, run the development server:
+**Create agent → set policy → fund guarded vault → request payment → enforce policy → execute or reject → verify receipt → inspect history.**
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+The repository currently contains the foundation slice plus locally tested enforcement contracts. The browser still uses the tiny probe until the registry/vault are deployed and wired into the payment UI. The probe is deliberately not a payment vault.
+
+## Current architecture
+
+```text
+Browser
+  └─ Next.js client page
+      ├─ wagmi + viem → injected wallet signer
+      ├─ viem public transport → Monad Testnet RPC
+      └─ AgentShieldProbe → marker read/write + confirmed receipt
+
+Enforcement contracts (locally tested, not yet deployed):
+  AgentRegistry → AgentGuardVault → policy checks → PaymentExecuted receipt
+
+Next app slice:
+  agent setup → policy editor → vault deposit → payment request → receipt/history
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The wallet signs transactions, but it does not hold or enforce the guarded balance. `AgentGuardVault` is the authority for payment policy. AI will eventually parse and explain requests; it will not receive keys or bypass contract checks.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+`AgentGuardVault` uses UTC calendar-day buckets (`block.timestamp / 1 days`), an owner-configured per-payment limit, a daily limit, an explicit recipient allowlist, an owner pause, and a request ID per payment. State is updated before the external native-MON transfer and protected by a reentrancy guard. Direct native-MON transfers without an agent context revert. Successful payments emit enough data to reconstruct the action and policy version; reverted calls do not retain events.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Requirements
 
-## Learn More
+- Node.js 22.13+ (the local environment currently uses Node 24.13.1)
+- npm
+- An EVM wallet such as MetaMask for browser interaction
+- Optional Monad Testnet MON from the [official faucet](https://faucet.monad.xyz) for testnet deployment and gas
 
-To learn more about Next.js, take a look at the following resources:
+## Run the app
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm install
+npm run dev
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Open [http://localhost:3000](http://localhost:3000).
 
-## Deploy on Vercel
+## Compile and test the contract
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+npm run contracts:compile
+npm run contracts:test
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The enforcement test suite covers allowed payments, reconstructable receipts, wrong signers, unapproved recipients, unauthorized policy changes, pause, per-payment and daily limits, duplicate request IDs, UTC-day rollover, failed recipient transfers, and direct-transfer rejection.
+
+## Enforcement contract layout
+
+- `contracts/AgentRegistry.sol`: owner, authorized signer, active state, and metadata hash.
+- `contracts/AgentGuardVault.sol`: native-MON custody, policy state, allowlist, nonce/request protection, and guarded execution.
+- `contracts/RejectingRecipient.sol`: test-only recipient used to prove failed transfers roll back spending state.
+
+The owner can deposit or withdraw funds administratively. The authorized agent signer has no withdrawal or arbitrary-call route; it can only call `executePayment` with an approved recipient and an amount allowed by the vault policy.
+
+## AI provider boundary
+
+The shared provider boundary now lives in `src/lib/ai/provider.ts`, and `src/lib/ai/payment-intent.ts` converts untrusted model output into one validated native-MON intent. Small network adapters for Kimi, OpenAI, Anthropic, AgentShield-managed inference, and external-agent callers will plug into that interface later. Provider credentials remain server-side and separate from wallet signing keys. A user key will never be placed in a `NEXT_PUBLIC_` variable, browser bundle, log, receipt, or contract call.
+
+“Sign in with ChatGPT” is not treated as generic OpenAI API access, and a Claude.ai subscription is not treated as Anthropic Console API access. These are separate integration and billing surfaces; implementation requires verified partner availability, permissions, tenant controls, and account eligibility.
+
+## Deploy the probe locally
+
+In terminal 1:
+
+```bash
+npm run contracts:node
+```
+
+In terminal 2:
+
+```bash
+npm run contracts:deploy:local
+```
+
+Copy the printed address into `.env.local` as `NEXT_PUBLIC_PROBE_CONTRACT_ADDRESS`. Restart `npm run dev`. The browser app is configured for Monad Testnet, so use the testnet deploy command for the live wallet flow below; the local deploy is for contract preparation and test isolation.
+
+## Deploy the probe to Monad Testnet
+
+1. Copy `.env.example` to `.env`.
+2. Set `PRIVATE_KEY` to a dedicated testnet-only deployer key. Never use a production key or expose it to the browser.
+3. Fund that address with testnet MON from the [official faucet](https://faucet.monad.xyz).
+4. Run:
+
+```bash
+npm run contracts:compile
+npm run contracts:deploy:testnet
+```
+
+5. Put the printed contract address in `.env.local` as `NEXT_PUBLIC_PROBE_CONTRACT_ADDRESS`, restart the app, connect the wallet, switch to Monad Testnet, and write a marker.
+
+Monad Testnet configuration used here: chain ID `10143`, native token `MON`, and public RPC `https://testnet-rpc.monad.xyz`. Confirm current values against the [official Monad testnet documentation](https://docs.monad.xyz/developer-essentials/testnet) before deployment.
+
+## Checks
+
+```bash
+npm run lint
+npm run typecheck
+npm run build
+npm run contracts:compile
+npm run contracts:test
+```
+
+See [docs/BUILD_LOG.md](docs/BUILD_LOG.md) for dated implementation notes, evidence, limitations, and the next slice.
