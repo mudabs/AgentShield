@@ -93,6 +93,19 @@ npm run contracts:compile
 npm run contracts:deploy:testnet
 ```
 
+To deploy the guarded payment contracts, use the dedicated script below after
+putting a funded testnet-only deployer key in `.env`:
+
+```bash
+npm run contracts:deploy:guarded:testnet
+```
+
+This deploys `AgentRegistry` first and passes its address into
+`AgentGuardVault`. It does not create an agent or move funds. Save the printed
+addresses as `NEXT_PUBLIC_REGISTRY_CONTRACT_ADDRESS` and
+`NEXT_PUBLIC_VAULT_CONTRACT_ADDRESS` in `.env.local` before wiring the browser
+flow.
+
 5. Put the printed contract address in `.env.local` as `NEXT_PUBLIC_PROBE_CONTRACT_ADDRESS`, restart the app, connect the wallet, switch to Monad Testnet, and write a marker.
 
 Monad Testnet configuration used here: chain ID `10143`, native token `MON`, and public RPC `https://testnet-rpc.monad.xyz`. Confirm current values against the [official Monad testnet documentation](https://docs.monad.xyz/developer-essentials/testnet) before deployment.

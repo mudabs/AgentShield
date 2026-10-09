@@ -106,3 +106,14 @@ References checked 2026-10-08:
 - https://help.openai.com/en/articles/20001542-using-your-chatgpt-plan-in-other-apps-and-sites
 - https://support.anthropic.com/en/articles/9876003-i-subscribe-to-a-paid-claude-ai-plan-why-do-i-have-to-pay-separately-for-api-usage-on-console
 - https://www.kimi.ai/help/kimi-api/api-overview
+
+## 2026-10-09 — Prepared guarded-contract deployment
+
+Current milestone: make the real registry/vault deployment repeatable before using the funded Monad testnet deployer.
+
+- Working: `scripts/deploy-guarded.ts` deploys `AgentRegistry`, then deploys `AgentGuardVault` with the registry address as its constructor argument.
+- Incomplete: no testnet deployment has been claimed; the browser is not yet wired to the guarded contract addresses; no agent or vault funds have been created onchain.
+- Changed: added guarded local/testnet npm commands and public address placeholders to `.env.example`.
+- Local verification: `npm run contracts:deploy:guarded:local` passed on chain `31337`, deployed both contracts, and verified `AgentGuardVault.registry()` matched the newly deployed registry address.
+- Important decision: the existing probe deployment remains available and unchanged. The guarded deployment has a separate command so the old foundation path is not silently replaced.
+- Next action: run the guarded deployment with a locally configured, funded testnet-only `PRIVATE_KEY`, then verify the chain ID and constructor linkage from the deployed addresses.

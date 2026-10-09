@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import {
   useAccount,
   useBalance,
-  useChainId,
   useConnect,
   useDisconnect,
   useReadContract,
@@ -30,8 +29,10 @@ function parseMarker(value: string) {
 
 export default function Home() {
   const [nextMarker, setNextMarker] = useState("1");
-  const { address, isConnected } = useAccount();
-  const chainId = useChainId();
+  // Read the chain from the connected wallet itself. useChainId() only reports
+  // chains listed in the wagmi config, so it can claim Monad Testnet while the
+  // wallet is actually on another network such as Ethereum Mainnet.
+  const { address, isConnected, chainId } = useAccount();
   const { connect, connectors, error: connectError, isPending: isConnecting } =
     useConnect();
   const { disconnect } = useDisconnect();

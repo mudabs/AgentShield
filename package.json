@@ -13,7 +13,9 @@
     "contracts:test": "hardhat test",
     "contracts:node": "hardhat node",
     "contracts:deploy:local": "hardhat run scripts/deploy-probe.ts --network localhost",
-    "contracts:deploy:testnet": "hardhat run scripts/deploy-probe.ts --network monadTestnet"
+    "contracts:deploy:testnet": "hardhat run scripts/deploy-probe.ts --network monadTestnet",
+    "contracts:deploy:guarded:local": "hardhat run scripts/deploy-guarded.ts --network localhost",
+    "contracts:deploy:guarded:testnet": "hardhat run scripts/deploy-guarded.ts --network monadTestnet"
   },
   "dependencies": {
     "@openzeppelin/contracts": "^5.6.1",
