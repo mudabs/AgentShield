@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
   useAccount,
@@ -322,11 +323,16 @@ export default function Home() {
             title="Keys stay in wallets"
             body="An agent signer can pay gas, but guarded funds will live in a contract with no unrestricted withdrawal route."
           />
-          <InfoCard
-            eyebrow="Next"
-            title="Registry + vault"
-            body="Next we replace the probe with an owner-controlled registry and a guarded native-MON vault."
-          />
+          <Link
+            className="rounded-3xl border border-lime-300/30 bg-lime-300/[0.06] p-6 transition hover:bg-lime-300/[0.1]"
+            href="/agent"
+          >
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-lime-200/70">Live on testnet</p>
+            <h3 className="mt-3 text-lg font-semibold text-white">Set up a guarded agent →</h3>
+            <p className="mt-3 text-sm leading-6 text-zinc-400">
+              The registry and vault are deployed. Register an agent you own and give it its own signer.
+            </p>
+          </Link>
         </section>
 
         <footer className="border-t border-white/10 pt-5 text-xs text-zinc-600">

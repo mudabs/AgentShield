@@ -117,3 +117,47 @@ Current milestone: make the real registry/vault deployment repeatable before usi
 - Local verification: `npm run contracts:deploy:guarded:local` passed on chain `31337`, deployed both contracts, and verified `AgentGuardVault.registry()` matched the newly deployed registry address.
 - Important decision: the existing probe deployment remains available and unchanged. The guarded deployment has a separate command so the old foundation path is not silently replaced.
 - Next action: run the guarded deployment with a locally configured, funded testnet-only `PRIVATE_KEY`, then verify the chain ID and constructor linkage from the deployed addresses.
+
+## 2026-10-09 — Phase 1 gate met; guarded contracts on Monad Testnet; agent setup screen
+
+### Current milestone and next action
+
+Phase 1 (foundation) is complete: the browser wrote to the probe on Monad Testnet through MetaMask and the owner observed the confirmed transaction. Phase 2 (enforcement) has started: `AgentRegistry` and `AgentGuardVault` are deployed to Monad Testnet and the browser can register an agent. Next action: owner-side policy screen (per-payment limit, daily limit, recipient allowlist, pause) and vault deposit.
+
+### Working / incomplete / blocked
+
+- Testnet verified: probe deployed and written from the browser (owner-observed; transaction hash not yet recorded here).
+- Testnet deployed: `AgentRegistry` and `AgentGuardVault`; deploy script verified `AgentGuardVault.registry()` equals the registry address.
+- Implemented, type-checked, lint-clean, production build passes: `/agent` screen to create an agent and inspect its onchain state. Not yet exercised against testnet in the browser.
+- Incomplete: policy editor, recipient allowlist UI, deposit, payment request, receipts, history.
+
+### Deployment references (Monad Testnet, chain 10143)
+
+- Deployer: `0xf421b7dd90905352fcb4ca3562107b4c90be33fa` (testnet-only account)
+- AgentShieldProbe: `0x914e3b1f91b1e2c07e65c234816dd550bccb2b29`
+- AgentRegistry: `0xe2a5d0d06466ef9db36ff926f1f7191a068ff095`
+- AgentGuardVault: `0x8969c41117698995c89070d3867a5676bfea3931` (constructed with the registry above)
+
+### Files changed and behavior added
+
+- `src/app/page.tsx`: read the chain ID from the connected wallet (`useAccount().chainId`) instead of `useChainId()`, which only reports configured chains and allowed the write button to appear enabled while MetaMask was on Ethereum Mainnet. Viem rejected that transaction before sending; no funds moved. Added a link to `/agent`.
+- `src/lib/guard.ts`: registry and vault ABIs generated from Hardhat artifacts, plus public address configuration.
+- `src/app/agent/page.tsx`: create-agent form (owner = connected wallet, separate agent signer, optional label), confirmed-receipt parsing of `AgentCreated`, list of agents owned by the wallet, and per-agent view of signer, status, vault balance, and policy.
+- `.env` (not committed): registry and vault addresses.
+
+### Important decisions and reasons
+
+- The UI refuses an agent signer equal to the owner. The contract allows it, but then the "agent" could change its own policy, which defeats the custody model.
+- Agent labels are stored only in the browser; onchain the registry receives `keccak256(label)` (or zero) because onchain data is public.
+- Owned agents are found by scanning the most recent 200 agent IDs via `getAgent`. Simple and indexer-free for the demo; replace with event indexing if usage grows.
+- An agent with no policy shows "Not set": the vault rejects every payment while `perPaymentLimit` is zero, which is the safe default.
+
+### Checks run and results
+
+- Owner machine: `npm run contracts:test` → 11 passing. `npm run contracts:deploy:testnet` and `npm run contracts:deploy:guarded:testnet` succeeded on chain 10143.
+- Clean Linux copy: `tsc --noEmit` passed, `eslint src` passed, `next build` passed with routes `/` and `/agent` (Google Fonts removed in the copy only because that sandbox cannot reach fonts.googleapis.com).
+
+### Known limitations
+
+- Create-agent flow not yet confirmed end to end in the browser against testnet.
+- Reverted transactions do not leave onchain rejection records (unchanged from earlier entries).
