@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   useAccount,
@@ -11,7 +11,6 @@ import {
   usePublicClient,
   useReadContract,
   useSwitchChain,
-  useWaitForTransactionReceipt,
   useWriteContract,
 } from "wagmi";
 import {
@@ -76,7 +75,7 @@ export default function AgentConsolePage() {
   const [amountInput, setAmountInput] = useState("");
   const [isChecking, setIsChecking] = useState(false);
   const [preview, setPreview] = useState<Preview>();
-  const [inFlight, setInFlight] = useState<Preview>();
+  const [isConfirming, setIsConfirming] = useState(false);
   const [attempts, setAttempts] = useState<Attempt[]>([]);
 
   // Agents whose authorized signer is the connected account.
@@ -113,58 +112,11 @@ export default function AgentConsolePage() {
     query: { enabled: Boolean(address) },
   });
 
-  const { data: hash, error: walletError, isPending: isAwaitingWallet, writeContract, reset } =
-    useWriteContract();
-  const { data: receipt, error: receiptError, isLoading: isConfirming } = useWaitForTransactionReceipt({
-    chainId: MONAD_TESTNET_CHAIN_ID,
-    hash,
-    query: { enabled: Boolean(hash) },
-  });
+  // Receipts are awaited with viem directly. wagmi's receipt helper throws on a
+  // reverted transaction, which would hide the fact that it was mined and refused.
+  const { isPending: isAwaitingWallet, writeContractAsync } = useWriteContract();
 
   const recordAttempt = (attempt: Attempt) => setAttempts((previous) => [attempt, ...previous]);
-
-  // When a submitted transaction settles, record what actually happened onchain.
-  useEffect(() => {
-    if (!receipt || !inFlight || !vaultAddress) return;
-    if (receipt.status === "success") {
-      const [executed] = parseEventLogs({
-        abi: vaultAbi,
-        eventName: "PaymentExecuted",
-        logs: receipt.logs.filter((log) => sameAddress(log.address, vaultAddress)),
-      });
-      recordAttempt({
-        ...inFlight,
-        outcome: "paid",
-        hash: receipt.transactionHash,
-        note: "Paid. The vault checked every rule onchain and sent the funds.",
-        policyVersion: executed?.args.policyVersion,
-        dayIndex: executed?.args.dayIndex,
-      });
-    } else {
-      recordAttempt({
-        ...inFlight,
-        outcome: "reverted-onchain",
-        hash: receipt.transactionHash,
-        note:
-          inFlight.verdict === "refused"
-            ? `Reverted onchain. No funds moved. The preview had predicted: ${inFlight.reason}`
-            : "Reverted onchain. No funds moved. Chain state changed between the preview and execution.",
-      });
-    }
-    setInFlight(undefined);
-    setPreview(undefined);
-    void refetchPolicy();
-    void refetchVaultBalance();
-    void refetchGasBalance();
-  }, [receipt]);
-
-  // Wallet cancellations and RPC failures also end the attempt.
-  useEffect(() => {
-    const error = walletError ?? receiptError;
-    if (!error || !inFlight) return;
-    recordAttempt({ ...inFlight, outcome: "failed", hash, note: describeError(error) });
-    setInFlight(undefined);
-  }, [walletError, receiptError]);
 
   const amount = parseMonAmount(amountInput);
   const recipientValid = isAddress(recipientInput.trim());
@@ -177,7 +129,6 @@ export default function AgentConsolePage() {
   /** Step 1: ask the vault, without sending anything, whether it would allow this payment. */
   const checkWithVault = async () => {
     if (!canCheck || !amount.ok || !publicClient || !vaultAddress || !address || agentId === undefined) return;
-    reset();
     const request: Request = {
       requestId: newRequestId(),
       recipient: getAddress(recipientInput.trim()),
@@ -200,18 +151,86 @@ export default function AgentConsolePage() {
     }
   };
 
-  /** Step 2: send the real transaction. The contract re-checks everything at execution. */
-  const submit = (forceOnchain: boolean) => {
-    if (!preview || !vaultAddress || agentId === undefined) return;
-    setInFlight(preview);
-    writeContract({
-      address: vaultAddress,
-      abi: vaultAbi,
-      functionName: "executePayment",
-      args: [agentId, preview.requestId, preview.recipient, preview.amountWei],
-      chainId: MONAD_TESTNET_CHAIN_ID,
-      ...(forceOnchain ? { gas: FORCED_SUBMIT_GAS } : {}),
-    });
+  /**
+   * Step 2: send the real transaction. The contract re-checks everything at execution.
+   * Every path ends by closing the preview and recording exactly one attempt.
+   */
+  const submit = async (forceOnchain: boolean) => {
+    if (!preview || !vaultAddress || !publicClient || !address || agentId === undefined) return;
+    const request = preview;
+    const args = [agentId, request.requestId, request.recipient, request.amountWei] as const;
+
+    let hash: Hash;
+    try {
+      hash = await writeContractAsync({
+        address: vaultAddress,
+        abi: vaultAbi,
+        functionName: "executePayment",
+        args,
+        chainId: MONAD_TESTNET_CHAIN_ID,
+        ...(forceOnchain ? { gas: FORCED_SUBMIT_GAS } : {}),
+      });
+    } catch (error) {
+      recordAttempt({ ...request, outcome: "failed", note: `Nothing was sent. ${describeError(error as Error)}` });
+      setPreview(undefined);
+      return;
+    }
+
+    setIsConfirming(true);
+    try {
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      if (receipt.status === "success") {
+        const [executed] = parseEventLogs({
+          abi: vaultAbi,
+          eventName: "PaymentExecuted",
+          logs: receipt.logs.filter((log) => sameAddress(log.address, vaultAddress)),
+        });
+        recordAttempt({
+          ...request,
+          outcome: "paid",
+          hash,
+          note: "Paid. The vault checked every rule onchain and sent the funds.",
+          policyVersion: executed?.args.policyVersion,
+          dayIndex: executed?.args.dayIndex,
+        });
+      } else {
+        // Replay the call against the state of the block it was mined in to learn
+        // the contract's actual reason. A reverted transaction changes no state.
+        let reason: string | undefined;
+        try {
+          await publicClient.simulateContract({
+            account: address,
+            address: vaultAddress,
+            abi: vaultAbi,
+            functionName: "executePayment",
+            args,
+            blockNumber: receipt.blockNumber,
+          });
+        } catch (replayError) {
+          reason = describeError(replayError as Error);
+        }
+        reason ??= request.verdict === "refused" ? `${request.reason} (from the preview)` : "reason unavailable";
+        recordAttempt({
+          ...request,
+          outcome: "reverted-onchain",
+          hash,
+          note: `Reached Monad and was reverted by the vault. No funds moved. ${reason}`,
+        });
+      }
+    } catch (error) {
+      recordAttempt({
+        ...request,
+        outcome: "failed",
+        hash,
+        note: `Sent, but the result could not be confirmed yet: ${describeError(error as Error)} Check the transaction link.`,
+      });
+    } finally {
+      setIsConfirming(false);
+      setPreview(undefined);
+      void refetchPolicy();
+      void refetchVaultBalance();
+      void refetchGasBalance();
+    }
   };
 
   const declineToSend = () => {
@@ -394,7 +413,7 @@ export default function AgentConsolePage() {
                   <button
                     className="mt-4 w-full rounded-xl bg-lime-300 px-4 py-3 text-sm font-bold text-zinc-950 hover:bg-lime-200 disabled:opacity-40"
                     disabled={busy}
-                    onClick={() => submit(false)}
+                    onClick={() => void submit(false)}
                   >
                     {isAwaitingWallet ? "Confirm in MetaMask…" : isConfirming ? "Confirming onchain…" : "Send payment"}
                   </button>
@@ -421,7 +440,7 @@ export default function AgentConsolePage() {
                     <button
                       className="rounded-xl bg-rose-300 px-4 py-3 text-sm font-bold text-zinc-950 hover:bg-rose-200 disabled:opacity-40"
                       disabled={busy}
-                      onClick={() => submit(true)}
+                      onClick={() => void submit(true)}
                     >
                       {isAwaitingWallet ? "Confirm in MetaMask…" : isConfirming ? "Confirming onchain…" : "Submit anyway"}
                     </button>

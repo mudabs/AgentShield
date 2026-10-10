@@ -219,3 +219,11 @@ Phase 2 gate in progress. Owner verified on Monad Testnet: agent #1 created (sig
 ### Checks run and results
 
 - Clean Linux copy: `tsc --noEmit` passed, `eslint src` passed, `next build` passed with routes `/`, `/agent`, `/pay`.
+
+## 2026-10-10 — Phase 2 gate met on testnet; console logging fix
+
+- Testnet verified by owner on `/pay` as agent #1's signer: 0.05 MON to the approved recipient was paid (`PaymentExecuted`, policy v3); 0.2, 0.5 and 0.6 MON requests submitted anyway were mined and reverted (`PerPaymentLimitExceeded` / `RecipientNotApproved`), vault balance unchanged at 0.45 MON; requests to the owner and to the agent's own address were refused (`RecipientNotApproved`).
+- Bug found by owner: a reverted "submit anyway" transaction was logged as "Not completed: Execution reverted for an unknown reason", and the refusal panel stayed open, so dismissing it added a second "Refused, not sent" entry for the same request. Cause: wagmi's `waitForTransactionReceipt` throws on reverted receipts instead of returning `status: "reverted"`.
+- Fix (`src/app/pay/page.tsx`): send with `writeContractAsync`, await the receipt with viem's `publicClient.waitForTransactionReceipt` (returns reverted receipts), replay the call at the receipt's block to recover the contract's actual revert reason, then close the preview. Each request now produces exactly one log entry: Paid, Blocked onchain, Refused (not sent), or Not completed (wallet cancel or unconfirmed).
+- Known follow-up: `/agent` and owner controls still use wagmi's receipt hook, so a reverted owner transaction would display as "Could not confirm" instead of "reverted". Owner actions are simulated first, so this is rare.
+- Checks on a clean Linux copy: `tsc --noEmit`, `eslint src`, `next build` passed.
