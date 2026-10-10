@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useAccount,
@@ -15,6 +15,7 @@ import { MONAD_TESTNET_CHAIN_ID, MONAD_TESTNET_EXPLORER_URL } from "@/lib/monad"
 import { registryAbi, registryAddress, vaultAbi, vaultAddress } from "@/lib/guard";
 import { parseMonAmount } from "@/lib/amounts";
 import { describeError } from "@/lib/errors";
+import { rememberRecipient, useRememberedRecipients } from "@/lib/recipients";
 
 type Tone = "info" | "success" | "warning" | "error";
 type Status = { tone: Tone; text: string };
@@ -94,50 +95,6 @@ function useVaultWrite(successText: string) {
   else if (receipt?.status === "success") status = { tone: "success", text: successText };
 
   return { send, status, hash, busy: isChecking || isAwaitingWallet || isConfirming };
-}
-
-// Recipients the owner has approved or checked, remembered in this browser so
-// they can be listed. Each row's approval status is always read from the chain.
-const recipientListeners = new Set<() => void>();
-const recipientsKey = (agentId: bigint) => `agentshield.recipients.${agentId.toString()}`;
-
-function readRecipientsRaw(agentId: bigint): string {
-  try {
-    return window.localStorage.getItem(recipientsKey(agentId)) ?? "[]";
-  } catch {
-    return "[]";
-  }
-}
-
-function rememberRecipient(agentId: bigint, recipient: Address) {
-  try {
-    const list = JSON.parse(readRecipientsRaw(agentId)) as string[];
-    if (!list.some((entry) => entry.toLowerCase() === recipient.toLowerCase())) {
-      list.push(recipient);
-      window.localStorage.setItem(recipientsKey(agentId), JSON.stringify(list));
-    }
-  } catch {
-    // Storage unavailable: the approval still happens onchain, it just is not listed here.
-  }
-  recipientListeners.forEach((notify) => notify());
-}
-
-function useRememberedRecipients(agentId: bigint): Address[] {
-  const raw = useSyncExternalStore(
-    (notify) => {
-      recipientListeners.add(notify);
-      return () => recipientListeners.delete(notify);
-    },
-    () => readRecipientsRaw(agentId),
-    () => "[]",
-  );
-  return useMemo(() => {
-    try {
-      return (JSON.parse(raw) as string[]).filter((entry) => isAddress(entry)) as Address[];
-    } catch {
-      return [];
-    }
-  }, [raw]);
 }
 
 export function OwnerControls({ agentId, canWrite }: { agentId: bigint; canWrite: boolean }) {
@@ -228,6 +185,10 @@ function PolicyCard({
   return (
     <Card eyebrow="Spending limits" title="How much, and how often">
       <p className="text-xs leading-5 text-zinc-500">
+        These limits apply to payments the agent makes out of the vault. Your own deposits are not
+        limited.
+      </p>
+      <p className="mt-2 text-xs leading-5 text-zinc-500">
         Current:{" "}
         {hasPolicy && currentDaily !== undefined
           ? `${formatEther(currentPerPayment)} MON per payment, ${formatEther(currentDaily)} MON per UTC day`

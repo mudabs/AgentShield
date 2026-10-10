@@ -23,27 +23,14 @@ import {
   zeroAddress,
   zeroHash,
   type Address,
-  type Hex,
-  type PublicClient,
 } from "viem";
 import { MONAD_TESTNET_CHAIN_ID, MONAD_TESTNET_EXPLORER_URL } from "@/lib/monad";
 import { registryAbi, registryAddress, vaultAbi, vaultAddress } from "@/lib/guard";
+import { loadAgents, sameAddress } from "@/lib/agents";
 import { describeError } from "@/lib/errors";
 import { OwnerControls } from "./owner-controls";
 
-// The registry has no "list agents by owner" function, so the page scans the most
-// recent agent IDs and keeps the ones owned by the connected wallet. This is fine
-// at hackathon scale; an event indexer replaces it later.
-const MAX_AGENTS_SCANNED = 200;
 const LABELS_STORAGE_KEY = "agentshield.agentLabels";
-
-type OwnedAgent = {
-  id: bigint;
-  owner: Address;
-  authorizedSigner: Address;
-  active: boolean;
-  metadataHash: Hex;
-};
 
 function shortAddress(value?: string) {
   return value ? `${value.slice(0, 6)}…${value.slice(-4)}` : "—";
@@ -61,36 +48,6 @@ function validateSigner(input: string, owner?: Address): string | undefined {
     return "Use a different account for the agent. If the owner and the agent are the same account, the agent could change its own limits.";
   }
   return undefined;
-}
-
-async function loadOwnedAgents(
-  client: PublicClient,
-  registry: Address,
-  owner: Address,
-): Promise<OwnedAgent[]> {
-  const nextAgentId = await client.readContract({
-    address: registry,
-    abi: registryAbi,
-    functionName: "nextAgentId",
-  });
-  const lastId = nextAgentId - BigInt(1);
-  const firstId = lastId > BigInt(MAX_AGENTS_SCANNED) ? lastId - BigInt(MAX_AGENTS_SCANNED - 1) : BigInt(1);
-
-  const ids: bigint[] = [];
-  for (let id = lastId; id >= firstId; id -= BigInt(1)) ids.push(id);
-
-  const agents = await Promise.all(
-    ids.map(async (id) => {
-      const agent = await client.readContract({
-        address: registry,
-        abi: registryAbi,
-        functionName: "getAgent",
-        args: [id],
-      });
-      return { id, ...agent };
-    }),
-  );
-  return agents.filter((agent) => agent.owner.toLowerCase() === owner.toLowerCase());
 }
 
 // Agent labels are a convenience for this browser only. Onchain, the registry
@@ -191,7 +148,8 @@ export default function AgentSetupPage() {
     // Including the receipt hash refetches the list as soon as a new agent is confirmed.
     queryKey: ["owned-agents", registryAddress, address, createReceipt?.transactionHash],
     enabled: Boolean(publicClient && registryAddress && address),
-    queryFn: () => loadOwnedAgents(publicClient!, registryAddress!, address!),
+    queryFn: () =>
+      loadAgents(publicClient!, registryAddress!, (agent) => sameAddress(agent.owner, address)),
   });
 
   const agents = agentsQuery.data ?? [];
@@ -413,6 +371,20 @@ export default function AgentSetupPage() {
         {selectedAgentId !== undefined && isConnected && contractsConfigured && (
           <OwnerControls agentId={selectedAgentId} canWrite={isOnMonadTestnet} />
         )}
+
+        <section className="pb-10">
+          <Link
+            className="block rounded-3xl border border-lime-300/30 bg-lime-300/[0.06] p-6 transition hover:bg-lime-300/[0.1]"
+            href="/pay"
+          >
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-lime-200/70">Step 3</p>
+            <h3 className="mt-2 text-lg font-semibold text-white">Act as the agent: request a payment →</h3>
+            <p className="mt-2 text-sm leading-6 text-zinc-400">
+              Switch MetaMask to the agent&apos;s signer account and ask the vault to pay. Allowed payments
+              go through; anything outside the rules is refused by the contract.
+            </p>
+          </Link>
+        </section>
 
         <footer className="border-t border-white/10 pt-5 text-xs text-zinc-600">
           Testnet only · Amounts are test MON with no real value · Registry {shortAddress(registryAddress)} · Vault{" "}

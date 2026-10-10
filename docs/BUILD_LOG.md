@@ -195,3 +195,27 @@ Phase 2 continues. The owner confirmed agent creation works in the browser again
 ### Known limitations
 
 - Lowering the daily limit below what was already spent today makes the next payment revert with an arithmetic panic instead of `DailyLimitExceeded` (contract message bug; funds stay safe).
+
+## 2026-10-10 — Agent console: guarded payment requests
+
+### Current milestone and next action
+
+Phase 2 gate in progress. Owner verified on Monad Testnet: agent #1 created (signer `0xacAC…2aFB`), policy 0.1 MON per payment / 0.3 MON per UTC day, one approved recipient (`0x1240…9c98df`), 0.5 MON deposited, policy version 3. Added `/pay`, where the agent signer requests payments. Next action: owner runs one allowed payment and at least one refused payment on testnet, then record the transaction hashes here.
+
+### Files changed and behavior added
+
+- `src/app/pay/page.tsx`: agent console. Finds agents whose signer is the connected wallet, shows live vault state (balance, limits, spent and left today, pause, policy version, gas wallet), previews a request with `simulateContract`, then sends `executePayment` with a fresh random 32-byte request ID. Refused requests can be cancelled or submitted anyway with a fixed gas limit so the contract's revert is visible onchain. Successful payments are read back from the `PaymentExecuted` event. Session attempt list is in memory and labelled as such.
+- `src/lib/agents.ts`: shared registry scan (`loadAgents`) used by `/agent` and `/pay`.
+- `src/lib/recipients.ts`: shared browser-only list of recipients the owner touched; approval status is always read from the vault.
+- `src/app/agent/owner-controls.tsx`: limits card now states that limits apply to agent payments out of the vault, not owner deposits.
+- `src/app/agent/page.tsx`: uses the shared loader; links to `/pay`.
+
+### Important decisions and reasons
+
+- The console does not pre-block requests on approval or limits. It validates only address and amount format and leaves policy to the contract, so the demo shows the contract, not the UI, enforcing the rules.
+- A preview is not authority. The status shown after sending comes from the confirmed receipt.
+- Reverted payments leave no onchain event; the console says so and keeps refused attempts only in the page session.
+
+### Checks run and results
+
+- Clean Linux copy: `tsc --noEmit` passed, `eslint src` passed, `next build` passed with routes `/`, `/agent`, `/pay`.
