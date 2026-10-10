@@ -227,3 +227,32 @@ Phase 2 gate in progress. Owner verified on Monad Testnet: agent #1 created (sig
 - Fix (`src/app/pay/page.tsx`): send with `writeContractAsync`, await the receipt with viem's `publicClient.waitForTransactionReceipt` (returns reverted receipts), replay the call at the receipt's block to recover the contract's actual revert reason, then close the preview. Each request now produces exactly one log entry: Paid, Blocked onchain, Refused (not sent), or Not completed (wallet cancel or unconfirmed).
 - Known follow-up: `/agent` and owner controls still use wagmi's receipt hook, so a reverted owner transaction would display as "Could not confirm" instead of "reverted". Owner actions are simulated first, so this is rare.
 - Checks on a clean Linux copy: `tsc --noEmit`, `eslint src`, `next build` passed.
+
+## 2026-10-10 — Phase 3 started: multi-model intent (Kimi, OpenAI, Claude)
+
+### Current milestone and next action
+
+Phase 3 (agent). Owner decision: multi-model, Kimi as the base, OpenAI second, Claude optional; budget under $10. Deadline: three days remain, two for building, the last for deployment and submission. Next action: owner adds `KIMI_API_KEY` and `OPENAI_API_KEY` to `.env`, then runs a real natural-language request through each model into the same guarded `executePayment` path.
+
+### Files changed and behavior added
+
+- `src/app/api/intent/route.ts`: `GET` lists providers and whether each is configured (never keys). `POST` takes `{provider, request, addressBook}`, asks the model, validates the answer, and returns a proposed intent with declared provider/model/latency metadata. Basic per-caller rate limit (10/min, in memory), 500-character request cap, 25-entry address book cap.
+- `src/lib/ai/providers.ts`: server-side adapters using `fetch` (no SDK dependency). Kimi `https://api.moonshot.ai/v1/chat/completions` (OpenAI-compatible, `response_format: json_object`, default `kimi-k2.6`); OpenAI chat completions (default `gpt-5-mini`, `reasoning_effort: low`); Anthropic Messages API (default `claude-haiku-5-5`). Models overridable by env. Keys read only from non-`NEXT_PUBLIC_` env vars.
+- `src/lib/ai/intent.ts`: system prompt containing address-book names only; JSON extraction; resolution rules: recipient must be an address-book name (case-insensitive, unambiguous) or a 0x address that appears verbatim in the user's text; output then passes `normalizePaymentIntent`.
+- `src/lib/recipients.ts`: address book entries now carry an optional name (old list format still read).
+- `src/app/agent/owner-controls.tsx`: name field when approving a recipient; names editable inline (browser-only).
+- `src/app/pay/page.tsx`: "Ask in plain language" panel with model picker, interpretation summary, and a button that feeds the validated proposal into the same vault preview and send flow. Attempts and previews show the declared model and original sentence.
+- `test/IntentResolution.test.ts`: name resolution, invented-address rejection, literal-address acceptance, ambiguity, declined/malformed output, zero and exponent amounts, JSON extraction, prompt contains no addresses.
+- `.env.example` documents the AI variables; `.gitignore` now un-ignores `.env.example`.
+
+### Important decisions and reasons
+
+- The model never sees addresses and cannot introduce one. A typed address is allowed so the demo can show the vault refusing an unapproved recipient even when the AI is told to "ignore the rules".
+- Provider and model names are declared metadata from this server, not proof of which model ran.
+- The AI step proposes; the vault preview and the contract decide. A successful interpretation does not imply the payment is allowed.
+
+### Checks run and results
+
+- Clean Linux copy: `tsc --noEmit` passed; `eslint src` passed; `node --test` on intent, payment-intent and amount tests: 15 passing; `next build` passed (`/api/intent` dynamic).
+- `next start` smoke test without keys: `GET /api/intent` listed three unconfigured providers; `POST` returned 503 "Kimi is not configured on this server"; unknown provider and invalid address book returned 400.
+- Not yet verified: real Kimi/OpenAI/Claude calls (no keys on this machine yet).

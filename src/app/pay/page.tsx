@@ -29,7 +29,7 @@ import { registryAddress, vaultAbi, vaultAddress } from "@/lib/guard";
 import { loadAgents, sameAddress } from "@/lib/agents";
 import { parseMonAmount } from "@/lib/amounts";
 import { describeError } from "@/lib/errors";
-import { useRememberedRecipients } from "@/lib/recipients";
+import { useAddressBook } from "@/lib/recipients";
 
 // A payment that the vault refuses reverts very early, so a fixed gas limit is
 // plenty. It lets the "submit anyway" path reach the chain even though the
@@ -37,7 +37,22 @@ import { useRememberedRecipients } from "@/lib/recipients";
 const FORCED_SUBMIT_GAS = BigInt(150_000);
 const LOW_GAS_WARNING = parseEther("0.02");
 
-type Request = { requestId: Hex; recipient: Address; amountWei: bigint };
+/** Declared AI context for a request: what was typed and which model interpreted it. */
+type Source = { providerLabel: string; model: string; prompt: string; memo?: string; recipientName?: string };
+type Request = { requestId: Hex; recipient: Address; amountWei: bigint; source?: Source };
+
+type ProviderInfo = { id: string; label: string; model: string; configured: boolean };
+type Interpretation =
+  | {
+      ok: true;
+      intent: { recipient: Address; amountWei: string; memo?: string };
+      recipientName?: string;
+      providerLabel: string;
+      model: string;
+      latencyMs: number;
+      prompt: string;
+    }
+  | { ok: false; message: string; providerLabel?: string; model?: string; rawOutput?: string };
 type Preview = Request & ({ verdict: "allowed" } | { verdict: "refused"; reason: string });
 
 type Attempt = Request & {
@@ -88,7 +103,25 @@ export default function AgentConsolePage() {
   const agents = agentsQuery.data ?? [];
   const agentId = chosenAgentId ?? agents[0]?.id;
   const agent = agents.find((candidate) => candidate.id === agentId);
-  const remembered = useRememberedRecipients(agentId);
+  const book = useAddressBook(agentId);
+  const namedBook = book.filter((entry) => entry.name.trim());
+
+  // AI interpretation state.
+  const providersQuery = useQuery({
+    queryKey: ["ai-providers"],
+    queryFn: async () => {
+      const response = await fetch("/api/intent");
+      if (!response.ok) throw new Error("Could not load AI providers.");
+      return ((await response.json()) as { providers: ProviderInfo[] }).providers;
+    },
+    staleTime: 60_000,
+  });
+  const providers = providersQuery.data ?? [];
+  const [chosenProvider, setChosenProvider] = useState<string>();
+  const activeProvider = chosenProvider ?? providers.find((entry) => entry.configured)?.id;
+  const [aiText, setAiText] = useState("");
+  const [isInterpreting, setIsInterpreting] = useState(false);
+  const [interpretation, setInterpretation] = useState<Interpretation>();
 
   const { data: policy, refetch: refetchPolicy } = useReadContract({
     address: vaultAddress,
@@ -121,19 +154,15 @@ export default function AgentConsolePage() {
   const amount = parseMonAmount(amountInput);
   const recipientValid = isAddress(recipientInput.trim());
   const busy = isChecking || isAwaitingWallet || isConfirming;
-  const canCheck =
-    isConnected && isOnMonadTestnet && agentId !== undefined && recipientValid && amount.ok && !busy;
+  const canPreview = isConnected && isOnMonadTestnet && agentId !== undefined && !busy;
+  const canCheck = canPreview && recipientValid && amount.ok;
 
   const clearPreview = () => setPreview(undefined);
 
   /** Step 1: ask the vault, without sending anything, whether it would allow this payment. */
-  const checkWithVault = async () => {
-    if (!canCheck || !amount.ok || !publicClient || !vaultAddress || !address || agentId === undefined) return;
-    const request: Request = {
-      requestId: newRequestId(),
-      recipient: getAddress(recipientInput.trim()),
-      amountWei: amount.wei,
-    };
+  const runCheck = async (recipient: Address, amountWei: bigint, source?: Source) => {
+    if (!canPreview || !publicClient || !vaultAddress || !address || agentId === undefined) return;
+    const request: Request = { requestId: newRequestId(), recipient, amountWei, source };
     setIsChecking(true);
     try {
       await publicClient.simulateContract({
@@ -149,6 +178,63 @@ export default function AgentConsolePage() {
     } finally {
       setIsChecking(false);
     }
+  };
+
+  const checkWithVault = () => {
+    if (!canCheck || !amount.ok) return;
+    void runCheck(getAddress(recipientInput.trim()), amount.wei);
+  };
+
+  /** Sends the sentence to the server, which asks the chosen model and validates its answer. */
+  const interpret = async () => {
+    const prompt = aiText.trim();
+    if (!prompt || !activeProvider) return;
+    setIsInterpreting(true);
+    setInterpretation(undefined);
+    clearPreview();
+    try {
+      const response = await fetch("/api/intent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: activeProvider,
+          request: prompt,
+          addressBook: namedBook.map((entry) => ({ name: entry.name.trim(), address: entry.address })),
+        }),
+      });
+      const result = (await response.json()) as Record<string, unknown>;
+      if (result.ok === true) {
+        setInterpretation({ ...(result as Omit<Extract<Interpretation, { ok: true }>, "prompt">), ok: true, prompt });
+      } else {
+        setInterpretation({
+          ok: false,
+          message: typeof result.message === "string" ? result.message : `Request failed (HTTP ${response.status}).`,
+          providerLabel: typeof result.providerLabel === "string" ? result.providerLabel : undefined,
+          model: typeof result.model === "string" ? result.model : undefined,
+          rawOutput: typeof result.rawOutput === "string" ? result.rawOutput : undefined,
+        });
+      }
+    } catch {
+      setInterpretation({ ok: false, message: "Could not reach the AgentShield server." });
+    } finally {
+      setIsInterpreting(false);
+    }
+  };
+
+  /** Hands the validated AI proposal to the exact same vault check as a manual request. */
+  const applyInterpretation = () => {
+    if (!interpretation?.ok) return;
+    const { intent } = interpretation;
+    const amountWei = BigInt(intent.amountWei);
+    setRecipientInput(intent.recipient);
+    setAmountInput(formatEther(amountWei));
+    void runCheck(getAddress(intent.recipient), amountWei, {
+      providerLabel: interpretation.providerLabel,
+      model: interpretation.model,
+      prompt: interpretation.prompt,
+      memo: intent.memo,
+      recipientName: interpretation.recipientName,
+    });
   };
 
   /**
@@ -345,7 +431,98 @@ export default function AgentConsolePage() {
                 </div>
               )}
 
-              <label className="mt-5 block">
+              <div className="mt-5 rounded-2xl border border-cyan-300/20 bg-cyan-300/[0.05] p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-cyan-100">Ask in plain language</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {providers.map((entry) => (
+                      <button
+                        className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                          entry.id === activeProvider
+                            ? "border-cyan-300 bg-cyan-300 text-zinc-950"
+                            : "border-white/15 bg-white/[0.04] text-zinc-300 hover:bg-white/10"
+                        }`}
+                        disabled={!entry.configured}
+                        key={entry.id}
+                        onClick={() => setChosenProvider(entry.id)}
+                        title={entry.configured ? entry.model : `${entry.label} is not configured on this server`}
+                      >
+                        {entry.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <textarea
+                  className="mt-3 w-full resize-none rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-cyan-300/50"
+                  maxLength={500}
+                  onChange={(event) => setAiText(event.target.value)}
+                  placeholder={
+                    namedBook[0] ? `e.g. Pay ${namedBook[0].name} 0.05 MON for the coffee order` : "e.g. Pay Shop 0.05 MON for the coffee order"
+                  }
+                  rows={2}
+                  value={aiText}
+                />
+                <p className="mt-1 text-[11px] leading-4 text-zinc-500">
+                  {namedBook.length > 0
+                    ? `The AI may only choose from your named recipients: ${namedBook.map((entry) => entry.name).join(", ")}.`
+                    : "Name your recipients on the Owner setup page so the AI can refer to them."}
+                </p>
+                <button
+                  className="mt-3 w-full rounded-xl bg-cyan-300 px-4 py-2.5 text-sm font-bold text-zinc-950 hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={!aiText.trim() || !activeProvider || isInterpreting || busy}
+                  onClick={() => void interpret()}
+                >
+                  {isInterpreting
+                    ? "Interpreting…"
+                    : activeProvider
+                      ? `Interpret with ${providers.find((entry) => entry.id === activeProvider)?.label ?? "AI"}`
+                      : providersQuery.isLoading
+                        ? "Loading models…"
+                        : "No AI model configured"}
+                </button>
+
+                {interpretation?.ok && (
+                  <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3 text-xs leading-5">
+                    <p className="text-zinc-300">
+                      <span className="font-semibold text-white">
+                        {interpretation.providerLabel} ({interpretation.model})
+                      </span>{" "}
+                      understood: pay <span className="font-mono text-white">{formatEther(BigInt(interpretation.intent.amountWei))} MON</span> to{" "}
+                      <span className="text-white">{interpretation.recipientName ?? "an address you typed"}</span>{" "}
+                      <span className="font-mono text-zinc-400">({shortAddress(interpretation.intent.recipient)})</span>
+                      {interpretation.intent.memo ? ` for "${interpretation.intent.memo}"` : ""}.
+                    </p>
+                    <p className="mt-1 text-zinc-500">
+                      Checked by AgentShield: valid address from your address book or your own text, valid amount.
+                      The vault still decides. ({interpretation.latencyMs} ms)
+                    </p>
+                    <button
+                      className="mt-3 w-full rounded-lg bg-lime-300 px-3 py-2 text-xs font-bold text-zinc-950 hover:bg-lime-200 disabled:opacity-40"
+                      disabled={!canPreview}
+                      onClick={applyInterpretation}
+                    >
+                      Check this request with the vault
+                    </button>
+                  </div>
+                )}
+                {interpretation && !interpretation.ok && (
+                  <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-300/10 p-3 text-xs leading-5 text-amber-100">
+                    <p>
+                      {interpretation.providerLabel ? `${interpretation.providerLabel}: ` : ""}
+                      {interpretation.message} Nothing was sent to the vault.
+                    </p>
+                    {interpretation.rawOutput && (
+                      <details className="mt-2 text-zinc-400">
+                        <summary className="cursor-pointer">Model output</summary>
+                        <pre className="mt-1 whitespace-pre-wrap break-all font-mono text-[11px]">{interpretation.rawOutput}</pre>
+                      </details>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <p className="mt-6 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Or fill it in yourself</p>
+              <label className="mt-3 block">
                 <span className="text-xs text-zinc-400">Pay to</span>
                 <input
                   className="mt-1 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 font-mono text-sm text-white outline-none placeholder:text-zinc-600 focus:border-lime-300/50"
@@ -358,18 +535,19 @@ export default function AgentConsolePage() {
                   value={recipientInput}
                 />
               </label>
-              {remembered.length > 0 && (
+              {book.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {remembered.map((recipient) => (
+                  {book.map((entry) => (
                     <button
-                      className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 font-mono text-[11px] text-zinc-300 hover:bg-white/10"
-                      key={recipient}
+                      className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] text-zinc-300 hover:bg-white/10"
+                      key={entry.address}
                       onClick={() => {
-                        setRecipientInput(recipient);
+                        setRecipientInput(entry.address);
                         clearPreview();
                       }}
                     >
-                      {shortAddress(recipient)}
+                      {entry.name ? `${entry.name} · ` : ""}
+                      <span className="font-mono">{shortAddress(entry.address)}</span>
                     </button>
                   ))}
                 </div>
@@ -397,7 +575,7 @@ export default function AgentConsolePage() {
                 <button
                   className="mt-5 w-full rounded-xl bg-lime-300 px-4 py-3 text-sm font-bold text-zinc-950 transition hover:bg-lime-200 disabled:cursor-not-allowed disabled:opacity-40"
                   disabled={!canCheck}
-                  onClick={() => void checkWithVault()}
+                  onClick={checkWithVault}
                 >
                   {isChecking ? "Asking the vault…" : "Check with the vault"}
                 </button>
@@ -407,9 +585,10 @@ export default function AgentConsolePage() {
                 <div className="mt-5 rounded-2xl border border-lime-300/25 bg-lime-300/[0.07] p-4">
                   <p className="text-sm font-semibold text-lime-100">The vault would allow this payment.</p>
                   <p className="mt-1 text-xs leading-5 text-zinc-400">
-                    {formatEther(preview.amountWei)} MON to {shortAddress(preview.recipient)}. This is a preview;
-                    the contract checks again when the transaction executes.
+                    {formatEther(preview.amountWei)} MON to {preview.source?.recipientName ?? shortAddress(preview.recipient)}.
+                    This is a preview; the contract checks again when the transaction executes.
                   </p>
+                  {preview.source && <SourceLine source={preview.source} />}
                   <button
                     className="mt-4 w-full rounded-xl bg-lime-300 px-4 py-3 text-sm font-bold text-zinc-950 hover:bg-lime-200 disabled:opacity-40"
                     disabled={busy}
@@ -424,6 +603,7 @@ export default function AgentConsolePage() {
                 <div className="mt-5 rounded-2xl border border-rose-300/25 bg-rose-300/[0.07] p-4">
                   <p className="text-sm font-semibold text-rose-100">The vault would refuse this payment.</p>
                   <p className="mt-1 text-xs leading-5 text-rose-100/80">{preview.reason}</p>
+                  {preview.source && <SourceLine source={preview.source} />}
                   <p className="mt-3 text-xs leading-5 text-zinc-400">
                     For the demo you can submit it anyway. The transaction will reach Monad and be reverted by the
                     contract, so no funds move. It still costs a small gas fee from the agent&apos;s wallet.
@@ -520,6 +700,7 @@ function AttemptRow({ attempt }: { attempt: Attempt }) {
         <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${badge.style}`}>{badge.text}</span>
       </div>
       <p className="mt-2 text-xs leading-5 text-zinc-400">{attempt.note}</p>
+      {attempt.source && <SourceLine source={attempt.source} />}
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] text-zinc-500">
         <span>request {shortAddress(attempt.requestId)}</span>
         {attempt.policyVersion !== undefined && <span>policy v{attempt.policyVersion.toString()}</span>}
@@ -536,6 +717,15 @@ function AttemptRow({ attempt }: { attempt: Attempt }) {
         )}
       </div>
     </li>
+  );
+}
+
+function SourceLine({ source }: { source: Source }) {
+  return (
+    <p className="mt-2 text-[11px] leading-4 text-zinc-500">
+      Requested in plain language via {source.providerLabel} ({source.model}, declared): &ldquo;{source.prompt}&rdquo;
+      {source.memo ? ` · memo: ${source.memo}` : ""}
+    </p>
   );
 }
 

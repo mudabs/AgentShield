@@ -1,11 +1,15 @@
 "use client";
 
 import { useMemo, useSyncExternalStore } from "react";
-import { isAddress, type Address } from "viem";
+import { getAddress, isAddress, type Address } from "viem";
 
-// Recipients the owner has approved or checked, remembered in this browser so
-// they can be listed. Approval itself always lives onchain in the vault; any UI
-// that shows "approved" must read it from the chain, not from this list.
+// The owner's address book for each agent, remembered in this browser: the
+// recipients they approved or checked, with an optional name for the AI to use.
+// Approval itself always lives onchain in the vault; any UI that shows
+// "approved" must read it from the chain, not from this list.
+
+export type BookEntry = { address: Address; name: string };
+
 const listeners = new Set<() => void>();
 const storageKey = (agentId: bigint) => `agentshield.recipients.${agentId.toString()}`;
 
@@ -17,20 +21,50 @@ function readRaw(agentId: bigint): string {
   }
 }
 
-export function rememberRecipient(agentId: bigint, recipient: Address) {
+/** Accepts both the old format (list of addresses) and the new one (list of {address, name}). */
+function parseBook(raw: string): BookEntry[] {
   try {
-    const list = JSON.parse(readRaw(agentId)) as string[];
-    if (!list.some((entry) => entry.toLowerCase() === recipient.toLowerCase())) {
-      list.push(recipient);
-      window.localStorage.setItem(storageKey(agentId), JSON.stringify(list));
+    const list = JSON.parse(raw) as unknown[];
+    const entries: BookEntry[] = [];
+    for (const item of list) {
+      const address = typeof item === "string" ? item : (item as { address?: unknown })?.address;
+      const name = typeof item === "object" && item !== null ? (item as { name?: unknown }).name : "";
+      if (typeof address === "string" && isAddress(address)) {
+        entries.push({ address: getAddress(address), name: typeof name === "string" ? name : "" });
+      }
     }
+    return entries;
   } catch {
-    // Storage unavailable: the onchain approval still happens, it just is not listed here.
+    return [];
+  }
+}
+
+function writeBook(agentId: bigint, entries: BookEntry[]) {
+  try {
+    window.localStorage.setItem(storageKey(agentId), JSON.stringify(entries));
+  } catch {
+    // Storage unavailable: onchain approvals still happen, they just are not listed here.
   }
   listeners.forEach((notify) => notify());
 }
 
-export function useRememberedRecipients(agentId: bigint | undefined): Address[] {
+/** Adds a recipient if new. Updates the name only when one is given. */
+export function rememberRecipient(agentId: bigint, recipient: Address, name?: string) {
+  const entries = parseBook(readRaw(agentId));
+  const existing = entries.find((entry) => entry.address === getAddress(recipient));
+  if (existing) {
+    if (name !== undefined) existing.name = name.trim();
+  } else {
+    entries.push({ address: getAddress(recipient), name: name?.trim() ?? "" });
+  }
+  writeBook(agentId, entries);
+}
+
+export function setRecipientName(agentId: bigint, recipient: Address, name: string) {
+  rememberRecipient(agentId, recipient, name);
+}
+
+export function useAddressBook(agentId: bigint | undefined): BookEntry[] {
   const raw = useSyncExternalStore(
     (notify) => {
       listeners.add(notify);
@@ -39,11 +73,10 @@ export function useRememberedRecipients(agentId: bigint | undefined): Address[] 
     () => (agentId === undefined ? "[]" : readRaw(agentId)),
     () => "[]",
   );
-  return useMemo(() => {
-    try {
-      return (JSON.parse(raw) as string[]).filter((entry) => isAddress(entry)) as Address[];
-    } catch {
-      return [];
-    }
-  }, [raw]);
+  return useMemo(() => parseBook(raw), [raw]);
+}
+
+export function useRememberedRecipients(agentId: bigint | undefined): Address[] {
+  const book = useAddressBook(agentId);
+  return useMemo(() => book.map((entry) => entry.address), [book]);
 }

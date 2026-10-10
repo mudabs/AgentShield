@@ -15,7 +15,7 @@ import { MONAD_TESTNET_CHAIN_ID, MONAD_TESTNET_EXPLORER_URL } from "@/lib/monad"
 import { registryAbi, registryAddress, vaultAbi, vaultAddress } from "@/lib/guard";
 import { parseMonAmount } from "@/lib/amounts";
 import { describeError } from "@/lib/errors";
-import { rememberRecipient, useRememberedRecipients } from "@/lib/recipients";
+import { rememberRecipient, setRecipientName, useAddressBook } from "@/lib/recipients";
 
 type Tone = "info" | "success" | "warning" | "error";
 type Status = { tone: Tone; text: string };
@@ -237,8 +237,9 @@ function RecipientsCard({
   canWrite: boolean;
 }) {
   const [input, setInput] = useState("");
+  const [nameInput, setNameInput] = useState("");
   const [touched, setTouched] = useState(false);
-  const remembered = useRememberedRecipients(agentId);
+  const book = useAddressBook(agentId);
   const write = useVaultWrite("Recipient list updated onchain.");
   const validation = validateRecipient(input, agentSigner);
 
@@ -246,23 +247,32 @@ function RecipientsCard({
     setTouched(true);
     const recipient = target ?? (validation ? undefined : getAddress(input.trim()));
     if (!recipient) return;
-    rememberRecipient(agentId, recipient);
+    rememberRecipient(agentId, recipient, target ? undefined : nameInput.trim() || undefined);
     void write.send({ functionName: "setRecipientApproval", args: [agentId, recipient, approved] });
   };
 
   return (
     <Card eyebrow="Approved recipients" title="Who the agent may pay">
       <p className="text-xs leading-5 text-zinc-500">
-        Payments to any address not on this list are refused. For the demo, use another account you
-        control, such as a third MetaMask account named &ldquo;Shop&rdquo;.
+        Payments to any address not on this list are refused. Give each recipient a name so the AI can
+        refer to it (&ldquo;pay Shop 0.05 MON&rdquo;). Names stay in this browser; approvals are onchain.
       </p>
-      <input
-        className="mt-4 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 font-mono text-sm text-white outline-none placeholder:text-zinc-600 focus:border-lime-300/50"
-        onChange={(event) => setInput(event.target.value)}
-        placeholder="0x… recipient address"
-        spellCheck={false}
-        value={input}
-      />
+      <div className="mt-4 grid gap-2 sm:grid-cols-[0.35fr_0.65fr]">
+        <input
+          className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-lime-300/50"
+          maxLength={40}
+          onChange={(event) => setNameInput(event.target.value)}
+          placeholder="Name, e.g. Shop"
+          value={nameInput}
+        />
+        <input
+          className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 font-mono text-sm text-white outline-none placeholder:text-zinc-600 focus:border-lime-300/50"
+          onChange={(event) => setInput(event.target.value)}
+          placeholder="0x… recipient address"
+          spellCheck={false}
+          value={input}
+        />
+      </div>
       {touched && validation && <p className="mt-2 text-xs text-rose-300">{validation}</p>}
       <StatusLine hash={write.hash} status={write.status} />
       <ActionButton
@@ -270,15 +280,17 @@ function RecipientsCard({
         label={write.busy ? "Working…" : "Approve recipient"}
         onClick={() => submit(true)}
       />
-      {remembered.length > 0 && (
+      {book.length > 0 && (
         <ul className="mt-4 space-y-2">
-          {remembered.map((recipient) => (
+          {book.map((entry) => (
             <RecipientRow
               agentId={agentId}
               busy={write.busy || !canWrite}
-              key={recipient}
-              onRevoke={() => submit(false, recipient)}
-              recipient={recipient}
+              key={entry.address}
+              name={entry.name}
+              onRename={(name) => setRecipientName(agentId, entry.address, name)}
+              onRevoke={() => submit(false, entry.address)}
+              recipient={entry.address}
             />
           ))}
         </ul>
@@ -290,13 +302,17 @@ function RecipientsCard({
 function RecipientRow({
   agentId,
   recipient,
+  name,
   busy,
   onRevoke,
+  onRename,
 }: {
   agentId: bigint;
   recipient: Address;
+  name: string;
   busy: boolean;
   onRevoke: () => void;
+  onRename: (name: string) => void;
 }) {
   const { data: approved } = useReadContract({
     address: vaultAddress,
@@ -308,8 +324,21 @@ function RecipientRow({
   });
   return (
     <li className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs">
-      <span className="font-mono text-zinc-300">
-        {recipient.slice(0, 8)}…{recipient.slice(-6)}
+      <span className="flex min-w-0 items-center gap-2">
+        <input
+          aria-label="Recipient name"
+          className="w-24 rounded-md border border-transparent bg-transparent px-1 py-0.5 text-zinc-100 outline-none placeholder:text-zinc-600 hover:border-white/10 focus:border-lime-300/50"
+          defaultValue={name}
+          key={name}
+          maxLength={40}
+          onBlur={(event) => {
+            if (event.target.value.trim() !== name) onRename(event.target.value);
+          }}
+          placeholder="Add name"
+        />
+        <span className="font-mono text-zinc-400">
+          {recipient.slice(0, 8)}…{recipient.slice(-6)}
+        </span>
       </span>
       <span className="flex items-center gap-3">
         <span className={approved ? "text-lime-200" : "text-zinc-500"}>
