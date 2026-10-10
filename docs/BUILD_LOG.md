@@ -161,3 +161,37 @@ Phase 1 (foundation) is complete: the browser wrote to the probe on Monad Testne
 
 - Create-agent flow not yet confirmed end to end in the browser against testnet.
 - Reverted transactions do not leave onchain rejection records (unchanged from earlier entries).
+
+## 2026-10-10 — Owner controls: policy, recipients, deposit, pause
+
+### Current milestone and next action
+
+Phase 2 continues. The owner confirmed agent creation works in the browser against Monad Testnet. Added owner controls on `/agent`. Next action: owner exercises the controls on testnet, then build the agent-side payment request (allowed payment executes; prohibited payment is refused).
+
+### Working / incomplete / blocked
+
+- Testnet verified by owner: create-agent flow on `/agent` (agent ID and transaction hash not yet recorded here).
+- Implemented, type-checked, lint-clean, production build passes, not yet exercised on testnet: `configurePolicy`, `setRecipientApproval`, `deposit`, and `setPaused` from the owner wallet.
+- Incomplete: agent-side payment request, withdraw UI, receipts, history.
+
+### Files changed and behavior added
+
+- `src/app/agent/owner-controls.tsx`: four owner cards. Each action simulates the call against current chain state first (a preview only; the contract re-checks on execution), then asks the wallet to sign, then waits for the receipt and refreshes all reads. Shown only when the connected wallet owns the selected agent.
+- `src/lib/amounts.ts`: MON decimal string to integer wei, no floating point.
+- `src/lib/errors.ts`: plain-language text for wallet cancellations and each custom contract error.
+- `src/app/agent/page.tsx`: uses the shared error helper and renders the owner controls.
+- `test/Amounts.test.ts`: amount parsing accepts exact decimals and rejects zero, negative, exponent, comma, leading-zero, and over-precise input.
+
+### Important decisions and reasons
+
+- UI refuses approving the agent's own signer or the vault as a recipient. The contract would accept the signer, but paying itself moves funds outside the vault's protection.
+- The approved-recipient list is remembered per agent in the browser because the vault has no enumeration function; each row's approval state is read live from the chain.
+- Deposit blocks amounts at or above the wallet balance so gas remains available.
+
+### Checks run and results
+
+- Clean Linux copy: `tsc --noEmit` passed, `eslint src` passed, `next build` passed (routes `/`, `/agent`; Google Fonts stubbed in the copy only), `node --test test/Amounts.test.ts` 2 passing.
+
+### Known limitations
+
+- Lowering the daily limit below what was already spent today makes the next payment revert with an arithmetic panic instead of `DailyLimitExceeded` (contract message bug; funds stay safe).

@@ -14,14 +14,12 @@ import {
   useWriteContract,
 } from "wagmi";
 import {
-  BaseError,
   formatEther,
   getAddress,
   isAddress,
   keccak256,
   parseEventLogs,
   stringToHex,
-  UserRejectedRequestError,
   zeroAddress,
   zeroHash,
   type Address,
@@ -30,6 +28,8 @@ import {
 } from "viem";
 import { MONAD_TESTNET_CHAIN_ID, MONAD_TESTNET_EXPLORER_URL } from "@/lib/monad";
 import { registryAbi, registryAddress, vaultAbi, vaultAddress } from "@/lib/guard";
+import { describeError } from "@/lib/errors";
+import { OwnerControls } from "./owner-controls";
 
 // The registry has no "list agents by owner" function, so the page scans the most
 // recent agent IDs and keeps the ones owned by the connected wallet. This is fine
@@ -47,16 +47,6 @@ type OwnedAgent = {
 
 function shortAddress(value?: string) {
   return value ? `${value.slice(0, 6)}…${value.slice(-4)}` : "—";
-}
-
-function describeError(error: Error) {
-  if (error instanceof BaseError) {
-    if (error.walk((cause) => cause instanceof UserRejectedRequestError)) {
-      return "You cancelled the request in your wallet. Nothing was sent.";
-    }
-    return error.shortMessage;
-  }
-  return error.message;
 }
 
 /** Checks the agent signer address before anything is sent to the wallet. */
@@ -419,6 +409,10 @@ export default function AgentSetupPage() {
             )}
           </div>
         </section>
+
+        {selectedAgentId !== undefined && isConnected && contractsConfigured && (
+          <OwnerControls agentId={selectedAgentId} canWrite={isOnMonadTestnet} />
+        )}
 
         <footer className="border-t border-white/10 pt-5 text-xs text-zinc-600">
           Testnet only · Amounts are test MON with no real value · Registry {shortAddress(registryAddress)} · Vault{" "}
