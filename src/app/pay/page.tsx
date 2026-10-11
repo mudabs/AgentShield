@@ -29,7 +29,8 @@ import { registryAddress, vaultAbi, vaultAddress } from "@/lib/guard";
 import { loadAgents, sameAddress } from "@/lib/agents";
 import { parseMonAmount } from "@/lib/amounts";
 import { describeError } from "@/lib/errors";
-import { useAddressBook } from "@/lib/recipients";
+import { setRecipientName, useAddressBook, type BookEntry } from "@/lib/recipients";
+import { SiteNav } from "../site-nav";
 
 // A payment that the vault refuses reverts very early, so a fixed gas limit is
 // plenty. It lets the "submit anyway" path reach the chain even though the
@@ -221,13 +222,16 @@ export default function AgentConsolePage() {
     }
   };
 
-  /** Hands the validated AI proposal to the exact same vault check as a manual request. */
+  /**
+   * Hands the validated AI proposal to the exact same vault check as a manual request.
+   * The proposal is consumed here, so it cannot be sent twice, and the manual form
+   * is left alone: the preview card shows exactly what will be paid.
+   */
   const applyInterpretation = () => {
     if (!interpretation?.ok) return;
     const { intent } = interpretation;
     const amountWei = BigInt(intent.amountWei);
-    setRecipientInput(intent.recipient);
-    setAmountInput(formatEther(amountWei));
+    setInterpretation(undefined);
     void runCheck(getAddress(intent.recipient), amountWei, {
       providerLabel: interpretation.providerLabel,
       model: interpretation.model,
@@ -311,8 +315,12 @@ export default function AgentConsolePage() {
         note: `Sent, but the result could not be confirmed yet: ${describeError(error as Error)} Check the transaction link.`,
       });
     } finally {
+      // The request reached the chain, so it is finished: clear the manual form to
+      // avoid sending the same payment again by accident.
       setIsConfirming(false);
       setPreview(undefined);
+      setRecipientInput("");
+      setAmountInput("");
       void refetchPolicy();
       void refetchVaultBalance();
       void refetchGasBalance();
@@ -346,9 +354,7 @@ export default function AgentConsolePage() {
             </div>
           </Link>
           <div className="flex items-center gap-3">
-            <Link className="text-xs text-zinc-400 underline-offset-4 hover:underline" href="/agent">
-              Owner setup
-            </Link>
+            <SiteNav />
             {isConnected ? (
               <button
                 className="rounded-full border border-white/15 bg-white/[0.06] px-4 py-2 text-xs font-semibold text-white transition hover:bg-white/10"
@@ -465,8 +471,9 @@ export default function AgentConsolePage() {
                 <p className="mt-1 text-[11px] leading-4 text-zinc-500">
                   {namedBook.length > 0
                     ? `The AI may only choose from your named recipients: ${namedBook.map((entry) => entry.name).join(", ")}.`
-                    : "Name your recipients on the Owner setup page so the AI can refer to them."}
+                    : "The AI only knows recipients by name. Name at least one below."}
                 </p>
+                {agentId !== undefined && book.length > 0 && <AddressBookEditor agentId={agentId} book={book} />}
                 <button
                   className="mt-3 w-full rounded-xl bg-cyan-300 px-4 py-2.5 text-sm font-bold text-zinc-950 hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-40"
                   disabled={!aiText.trim() || !activeProvider || isInterpreting || busy}
@@ -717,6 +724,41 @@ function AttemptRow({ attempt }: { attempt: Attempt }) {
         )}
       </div>
     </li>
+  );
+}
+
+/** Names live only in this browser. Approval is still read from the vault. */
+function AddressBookEditor({ agentId, book }: { agentId: bigint; book: BookEntry[] }) {
+  return (
+    <details className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3" open={book.every((entry) => !entry.name)}>
+      <summary className="cursor-pointer text-xs font-semibold text-zinc-300">
+        Address book ({book.filter((entry) => entry.name).length} of {book.length} named)
+      </summary>
+      <ul className="mt-3 space-y-2">
+        {book.map((entry) => (
+          <li className="flex flex-wrap items-center gap-2" key={entry.address}>
+            <input
+              aria-label={`Name for ${entry.address}`}
+              className="w-32 rounded-lg border border-white/20 bg-black/30 px-2 py-1.5 text-xs text-white outline-none placeholder:text-zinc-500 focus:border-cyan-300/60"
+              defaultValue={entry.name}
+              key={entry.name}
+              maxLength={40}
+              onBlur={(event) => {
+                if (event.target.value.trim() !== entry.name) setRecipientName(agentId, entry.address, event.target.value);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") event.currentTarget.blur();
+              }}
+              placeholder="Name, e.g. Shop"
+            />
+            <span className="font-mono text-[11px] text-zinc-400">{shortAddress(entry.address)}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-[11px] leading-4 text-zinc-500">
+        Type a name and press Enter. Naming does not approve anyone; only the owner can approve recipients onchain.
+      </p>
+    </details>
   );
 }
 

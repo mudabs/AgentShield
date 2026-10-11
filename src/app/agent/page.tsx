@@ -29,6 +29,7 @@ import { registryAbi, registryAddress, vaultAbi, vaultAddress } from "@/lib/guar
 import { loadAgents, sameAddress } from "@/lib/agents";
 import { describeError } from "@/lib/errors";
 import { OwnerControls } from "./owner-controls";
+import { SiteNav } from "../site-nav";
 
 const LABELS_STORAGE_KEY = "agentshield.agentLabels";
 
@@ -209,7 +210,8 @@ export default function AgentSetupPage() {
               <p className="text-xs text-zinc-500">Agent setup</p>
             </div>
           </Link>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <SiteNav />
             <span className="hidden rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-zinc-300 sm:inline">
               {isConnected ? (isOnMonadTestnet ? "Monad Testnet" : `Wrong network (chain ${chainId})`) : "Not connected"}
             </span>

@@ -256,3 +256,11 @@ Phase 3 (agent). Owner decision: multi-model, Kimi as the base, OpenAI second, C
 - Clean Linux copy: `tsc --noEmit` passed; `eslint src` passed; `node --test` on intent, payment-intent and amount tests: 15 passing; `next build` passed (`/api/intent` dynamic).
 - `next start` smoke test without keys: `GET /api/intent` listed three unconfigured providers; `POST` returned 503 "Kimi is not configured on this server"; unknown provider and invalid address book returned 400.
 - Not yet verified: real Kimi/OpenAI/Claude calls (no keys on this machine yet).
+
+## 2026-10-10 — Phase 3 gate met on testnet; address book page; duplicate-send fix
+
+- Testnet verified by owner on `/pay`: the same sentence ("Pay Shop … MON for the coffee order") interpreted by Kimi (`kimi-k2.6`), OpenAI (`gpt-5-mini-2025-08-07` as reported by the API) and Claude (`claude-haiku-5-5`) each produced a validated intent that the vault executed (0.05, 0.01, 0.02 MON to Shop, policy v3). Earlier, Kimi correctly returned `action: none` when Shop had no address-book name, and the request never reached the vault.
+- Owner-reported UX issue: applying an AI proposal also filled the manual form, and the proposal card stayed active after payment, so a second click could send a duplicate payment. Fix: applying a proposal no longer touches the manual form and consumes the proposal; once a transaction reaches the chain (paid, reverted, or unconfirmed) the manual form clears.
+- New `/book` (address book): pick an agent you own or sign for; look up any address (in book? approved onchain? owner or signer?); add, rename, or remove contacts (browser-only); table with live onchain approval per contact and explorer links. Removing a contact does not revoke approval.
+- New `src/app/site-nav.tsx`: shared navigation (Owner setup, Agent console, Address book) on `/agent`, `/pay`, `/book`.
+- Checks on a clean Linux copy: `tsc --noEmit`, `eslint src`, `next build` passed (routes `/`, `/agent`, `/pay`, `/book`, `/api/intent`).

@@ -327,14 +327,14 @@ function RecipientRow({
       <span className="flex min-w-0 items-center gap-2">
         <input
           aria-label="Recipient name"
-          className="w-24 rounded-md border border-transparent bg-transparent px-1 py-0.5 text-zinc-100 outline-none placeholder:text-zinc-600 hover:border-white/10 focus:border-lime-300/50"
+          className="w-28 rounded-md border border-white/20 bg-black/30 px-2 py-1 text-zinc-100 outline-none placeholder:text-zinc-500 focus:border-lime-300/60"
           defaultValue={name}
           key={name}
           maxLength={40}
           onBlur={(event) => {
             if (event.target.value.trim() !== name) onRename(event.target.value);
           }}
-          placeholder="Add name"
+          placeholder="Name, e.g. Shop"
         />
         <span className="font-mono text-zinc-400">
           {recipient.slice(0, 8)}…{recipient.slice(-6)}

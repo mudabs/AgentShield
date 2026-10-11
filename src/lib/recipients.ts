@@ -80,3 +80,9 @@ export function useRememberedRecipients(agentId: bigint | undefined): Address[] 
   const book = useAddressBook(agentId);
   return useMemo(() => book.map((entry) => entry.address), [book]);
 }
+
+/** Removes a contact from this browser's address book. It does not change onchain approval. */
+export function forgetRecipient(agentId: bigint, recipient: Address) {
+  const entries = parseBook(readRaw(agentId)).filter((entry) => entry.address !== getAddress(recipient));
+  writeBook(agentId, entries);
+}
