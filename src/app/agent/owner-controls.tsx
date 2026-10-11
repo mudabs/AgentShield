@@ -21,9 +21,11 @@ type Tone = "info" | "success" | "warning" | "error";
 type Status = { tone: Tone; text: string };
 
 type VaultCall = {
-  functionName: "configurePolicy" | "setRecipientApproval" | "setPaused" | "deposit";
+  functionName: "configurePolicy" | "setRecipientApproval" | "setPaused" | "deposit" | "setAuthorizedSigner";
   args: readonly unknown[];
   value?: bigint;
+  /** Which contract to call. Defaults to the vault; signer rotation lives on the registry. */
+  contract?: "vault" | "registry";
 };
 
 /**
@@ -55,15 +57,17 @@ export function useVaultWrite(successText: string) {
   }, [receipt, queryClient]);
 
   const send = async (call: VaultCall) => {
-    if (!vaultAddress || !publicClient || !address) return;
+    const target = call.contract === "registry" ? registryAddress : vaultAddress;
+    const abi = (call.contract === "registry" ? registryAbi : vaultAbi) as Abi;
+    if (!target || !publicClient || !address) return;
     reset();
     setPreflightError(undefined);
     setIsChecking(true);
     try {
       await publicClient.simulateContract({
         account: address,
-        address: vaultAddress,
-        abi: vaultAbi as Abi,
+        address: target,
+        abi,
         functionName: call.functionName,
         args: call.args,
         value: call.value,
@@ -75,8 +79,8 @@ export function useVaultWrite(successText: string) {
     }
     setIsChecking(false);
     writeContract({
-      address: vaultAddress,
-      abi: vaultAbi as Abi,
+      address: target,
+      abi,
       functionName: call.functionName,
       args: call.args,
       value: call.value,
@@ -152,6 +156,7 @@ export function OwnerControls({ agentId, canWrite }: { agentId: bigint; canWrite
         <RecipientsCard agentId={agentId} agentSigner={agent.authorizedSigner} canWrite={canWrite} />
         <DepositCard agentId={agentId} canWrite={canWrite} owner={address} />
         <PauseCard agentId={agentId} canWrite={canWrite} paused={paused} />
+        <SignerCard agentId={agentId} canWrite={canWrite} currentSigner={agent.authorizedSigner} owner={address} />
       </div>
     </section>
   );
@@ -213,11 +218,25 @@ function PolicyCard({
   );
 }
 
+/**
+ * Mixed-case addresses carry a checksum (EIP-55). A wrong capital letter usually
+ * means a typo, so it is rejected with a message that says so instead of a silently
+ * disabled button. All-lowercase input has no checksum and is accepted.
+ */
+function describeAddressProblem(value: string): string | undefined {
+  if (isAddress(value)) return undefined;
+  if (isAddress(value, { strict: false })) {
+    return "The capital letters in this address do not match its checksum, which usually means a typo. Paste it again, or type it all in lowercase.";
+  }
+  return "That is not a valid address. It should be 0x followed by 40 hex characters.";
+}
+
 /** Rules that the contract does not enforce but that would undermine the guard. */
 function validateRecipient(input: string, agentSigner: Address): string | undefined {
   const value = input.trim();
   if (!value) return "Enter the address the agent should be allowed to pay.";
-  if (!isAddress(value)) return "That is not a valid address. Copy it again and check for typos.";
+  const addressProblem = describeAddressProblem(value);
+  if (addressProblem) return addressProblem;
   const recipient = getAddress(value);
   if (recipient === zeroAddress) return "The zero address cannot receive payments.";
   if (vaultAddress && recipient === getAddress(vaultAddress)) return "The vault itself cannot be a recipient.";
@@ -273,7 +292,7 @@ function RecipientsCard({
           value={input}
         />
       </div>
-      {touched && validation && <p className="mt-2 text-xs text-rose-300">{validation}</p>}
+      {(touched || input.trim()) && validation && <p className="mt-2 text-xs text-rose-300">{validation}</p>}
       <StatusLine hash={write.hash} status={write.status} />
       <ActionButton
         disabled={!canWrite || write.busy || Boolean(validation)}
@@ -346,7 +365,7 @@ function RecipientRow({
         </span>
         {approved && (
           <button className="text-rose-300 underline-offset-4 hover:underline disabled:opacity-40" disabled={busy} onClick={onRevoke}>
-            Remove
+            Revoke
           </button>
         )}
       </span>
@@ -407,6 +426,67 @@ function PauseCard({ agentId, paused, canWrite }: { agentId: bigint; paused?: bo
         onClick={() => void write.send({ functionName: "setPaused", args: [agentId, !paused] })}
       />
     </Card>
+  );
+}
+
+/**
+ * Key rotation. If the agent's signing key is lost or may be compromised, the owner
+ * points the agent at a new signer in one transaction. From the next block the old
+ * key can no longer request payments; funds, limits and approvals stay as they are.
+ */
+function SignerCard({
+  agentId,
+  currentSigner,
+  owner,
+  canWrite,
+}: {
+  agentId: bigint;
+  currentSigner: Address;
+  owner: Address;
+  canWrite: boolean;
+}) {
+  const [input, setInput] = useState("");
+  const write = useVaultWrite("Signer changed onchain. Only the new key can request payments now.");
+  const value = input.trim();
+  let validation = value ? describeAddressProblem(value) : "Enter the new signer address.";
+  if (!validation) {
+    const next = getAddress(value);
+    if (next === zeroAddress) validation = "The zero address cannot sign.";
+    else if (next === getAddress(currentSigner)) validation = "That is already this agent's signer.";
+    else if (next === getAddress(owner)) {
+      validation = "Use a separate account for the agent, not your owner wallet. Otherwise the agent key could change its own rules.";
+    } else if (vaultAddress && next === getAddress(vaultAddress)) validation = "The vault cannot be a signer.";
+  }
+  return (
+    <div className="md:col-span-2">
+      <Card eyebrow="Agent key" title="Change the agent's signer">
+        <p className="text-xs leading-5 text-zinc-500">
+          Current signer: <span className="font-mono text-zinc-300">{currentSigner}</span>. Use this if the
+          agent&rsquo;s key is lost or may be compromised. The old key immediately loses the ability to request
+          payments; the vault balance, limits and approved recipients stay the same.
+        </p>
+        <input
+          className="mt-4 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 font-mono text-sm text-white outline-none placeholder:text-zinc-600 focus:border-lime-300/50"
+          onChange={(event) => setInput(event.target.value)}
+          placeholder="0x… new agent signer address"
+          spellCheck={false}
+          value={input}
+        />
+        {value && validation && <p className="mt-2 text-xs text-rose-300">{validation}</p>}
+        <StatusLine hash={write.hash} status={write.status} />
+        <ActionButton
+          disabled={!canWrite || write.busy || Boolean(validation)}
+          label={write.busy ? "Working…" : "Change signer"}
+          onClick={() =>
+            void write.send({
+              contract: "registry",
+              functionName: "setAuthorizedSigner",
+              args: [agentId, getAddress(value)],
+            })
+          }
+        />
+      </Card>
+    </div>
   );
 }
 
