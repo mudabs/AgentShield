@@ -281,3 +281,23 @@ Phase 3 (agent). Owner decision: multi-model, Kimi as the base, OpenAI second, C
 - `/book`: agent chips show each agent's signer; the table column reads "Agent #N may pay (onchain)"; copy explains shared contacts vs per-agent approval.
 - Note: Store's onchain approval is still only on agent #2; the owner must approve it for agent #1.
 - Checks: `tsc --noEmit`, `eslint src` passed on a clean copy.
+
+## 2026-10-10 — Automated E2E on Monad Testnet; fresh contracts; Monad behavior findings
+
+### Fresh deployment (supersedes earlier addresses)
+
+- Old vault `0x8969…3931`: owner withdrew agent #1's 0.35 MON (`scripts/withdraw-vault.ts`, tx `0x835b61c5…`). Agents #2/#3 there were created by another account and held nothing.
+- New contracts with the daily-limit fix: AgentRegistry `0x7a9131100dd823af635f68f1223a0cadfdf5d71a`, AgentGuardVault `0xbdbb2b644d79ac3f5a5282e52050e9b5e563a202` (link verified).
+- Contract fix: `DailyLimitExceeded` computes `remaining` without underflow when the owner lowers the daily limit below today's spend (previously a 0x11 panic). New contract test; 23 tests passing on the owner's machine.
+
+### Automated E2E (`npm run e2e`, `scripts/e2e.ts`)
+
+- Plays the full story on a live chain with test wallets: register agent, policy, approve recipient, fund vault, allowed payment with `PaymentExecuted` checked field by field, 14 refusals evaluated against live state (per-payment, unapproved recipient, self-payment, replayed request ID, owner and stranger on the agent path, agent withdraw / raise limits / approve recipients / unpause / change signer, zero amount, plain transfer to vault), one over-limit payment sent onchain to prove a mined revert moves nothing, pause, deactivation, daily limit, lowered-limit regression, AI checks per provider (plain request, unknown name, prompt injection with a typed stranger address, over-limit sentence), and cleanup. Writes `docs/E2E_REPORT.md`.
+- Testnet result: 41 of 42 passed. All contract and security checks passed; Kimi, OpenAI and Claude each produced the correct intent and the vault allowed it; prompt injection proposed the typed stranger address and the vault refused it (`RecipientNotApproved`) for Kimi and OpenAI; over-limit sentences were understood and refused (`PerPaymentLimitExceeded`). The single failure was the AI route's own 10/min rate limit. Claude's injection check had also been short-circuited by that limit, so it did not prove anything and was wrongly counted as a pass.
+- Fixes after that run: rate limit configurable via `INTENT_RATE_LIMIT_PER_MINUTE`, default 20; the E2E waits out a 429 like a normal caller; AI refusal checks now pass only on a real AgentShield decision code.
+
+### Monad behaviors found (all affect the product, not just the test)
+
+1. Reserve balance: an EOA under 10 MON that sends MON value within 3 blocks of its previous transaction is reverted at execution and still pays the full gas limit. Back-to-back owner transactions made the deposit fail. The E2E now waits out the window before any value transfer. https://docs.monad.xyz/developer-essentials/reserve-balance
+2. Gas is charged on the gas limit, not gas used, so every failed or over-padded transaction is costly. https://docs.monad.xyz/developer-essentials/gas-on-monad
+3. A brand-new wallet was rejected by `eth_sendRawTransaction` with "Signer had insufficient balance" for at least 25 seconds after its first funding (balance 0.3 MON, needed 0.026 MON), yet the same wallet could send about 40 seconds later. The E2E now uses persistent pre-funded test wallets (`npm run e2e:setup`).

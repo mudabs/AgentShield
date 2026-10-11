@@ -189,6 +189,37 @@ describe("AgentGuardVault", async function () {
     );
   });
 
+  it("reports DailyLimitExceeded, not an arithmetic panic, after the owner lowers the daily limit", async function () {
+    const { owner, agentSigner, recipient, vault, agentId } = await deployFixture(viem, publicClient);
+
+    await waitForReceipt(
+      publicClient,
+      vault.write.executePayment(
+        [agentId, `0x${"0b".repeat(32)}` as `0x${string}`, recipient.account.address, parseEther("1")],
+        { account: agentSigner.account },
+      ),
+    );
+    // 1 MON already spent today; the owner tightens the daily limit to 0.5 MON.
+    await waitForReceipt(
+      publicClient,
+      vault.write.configurePolicy([agentId, parseEther("0.5"), parseEther("0.5")], {
+        account: owner.account,
+      }),
+    );
+
+    await assert.rejects(
+      () =>
+        vault.write.executePayment(
+          [agentId, `0x${"0c".repeat(32)}` as `0x${string}`, recipient.account.address, parseEther("0.1")],
+          { account: agentSigner.account },
+        ),
+      (error: Error) => {
+        assert.match(error.message, /DailyLimitExceeded/);
+        return true;
+      },
+    );
+  });
+
   it("resets the daily allowance on the next UTC day", async function () {
     const { agentSigner, recipient, vault, agentId } = await deployFixture(viem, publicClient);
     const amount = parseEther("1");

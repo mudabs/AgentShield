@@ -19,7 +19,7 @@ import { complete, isProviderId, listProviders, ProviderError } from "@/lib/ai/p
 // Basic abuse control: each caller gets a few model calls per minute. In-memory,
 // so it resets on restart and is per server instance. Good enough for a demo.
 const WINDOW_MS = 60_000;
-const MAX_CALLS_PER_WINDOW = 10;
+const MAX_CALLS_PER_WINDOW = Number(process.env.INTENT_RATE_LIMIT_PER_MINUTE) || 20;
 const recentCalls = new Map<string, number[]>();
 
 function rateLimited(caller: string): boolean {

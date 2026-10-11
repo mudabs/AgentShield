@@ -155,7 +155,11 @@ contract AgentGuardVault is ReentrancyGuard {
         uint256 dayIndex = _rollDailyWindow(policy);
         uint256 attempted = policy.spentToday + amount;
         if (attempted > policy.dailyLimit) {
-            revert DailyLimitExceeded(agentId, attempted, policy.dailyLimit - policy.spentToday);
+            // The owner may lower the daily limit below what was already spent today,
+            // so compute the remaining allowance without underflowing.
+            uint256 remaining =
+                policy.dailyLimit > policy.spentToday ? policy.dailyLimit - policy.spentToday : 0;
+            revert DailyLimitExceeded(agentId, attempted, remaining);
         }
         if (vaultBalance[agentId] < amount) {
             revert InsufficientVaultBalance(vaultBalance[agentId], amount);
