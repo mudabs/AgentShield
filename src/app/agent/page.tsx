@@ -29,6 +29,7 @@ import { registryAbi, registryAddress, vaultAbi, vaultAddress } from "@/lib/guar
 import { loadAgents, sameAddress } from "@/lib/agents";
 import { describeError } from "@/lib/errors";
 import { OwnerControls } from "./owner-controls";
+import { setSelectedAgentId, useSelectedAgentId } from "@/lib/selected-agent";
 import { SiteNav } from "../site-nav";
 
 const LABELS_STORAGE_KEY = "agentshield.agentLabels";
@@ -107,7 +108,6 @@ export default function AgentSetupPage() {
   const [label, setLabel] = useState("");
   const [signerInput, setSignerInput] = useState("");
   const [signerTouched, setSignerTouched] = useState(false);
-  const [chosenAgentId, setChosenAgentId] = useState<bigint>();
   const [pendingLabel, setPendingLabel] = useState("");
 
   const signerError = validateSigner(signerInput, address);
@@ -154,7 +154,12 @@ export default function AgentSetupPage() {
   });
 
   const agents = agentsQuery.data ?? [];
-  const selectedAgentId = chosenAgentId ?? createdAgentId ?? agents[0]?.id;
+  const selectedAgentId = useSelectedAgentId(agents.map((agent) => agent.id));
+
+  // Switch to a newly created agent once the chain confirms it.
+  useEffect(() => {
+    if (createdAgentId !== undefined) setSelectedAgentId(createdAgentId);
+  }, [createdAgentId]);
 
   const canSubmit =
     isConnected &&
@@ -168,7 +173,6 @@ export default function AgentSetupPage() {
     setSignerTouched(true);
     if (!canSubmit || !registryAddress) return;
     const trimmedLabel = label.trim();
-    setChosenAgentId(undefined);
     setPendingLabel(trimmedLabel);
     writeContract({
       address: registryAddress,
@@ -266,8 +270,12 @@ export default function AgentSetupPage() {
 
         <section className="grid gap-5 pb-10 lg:grid-cols-[1fr_1fr]">
           <div className="rounded-3xl border border-white/10 bg-[#101419] p-6 sm:p-7">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Create agent</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Register an AI agent</p>
             <h2 className="mt-2 text-2xl font-semibold text-white">New agent</h2>
+            <p className="mt-2 text-xs leading-5 text-amber-200/90">
+              Only for adding another AI agent (a wallet your AI signs with). To let an agent pay a person or shop,
+              add them under Approved recipients below, or in the Address book.
+            </p>
 
             <label className="mt-6 block">
               <span className="text-xs text-zinc-400">Owner (you)</span>
@@ -355,7 +363,7 @@ export default function AgentSetupPage() {
                         : "border-white/15 bg-white/[0.04] text-zinc-300 hover:bg-white/10"
                     }`}
                     key={agent.id.toString()}
-                    onClick={() => setChosenAgentId(agent.id)}
+                    onClick={() => setSelectedAgentId(agent.id)}
                   >
                     #{agent.id.toString()}
                     {labels[agent.id.toString()] ? ` · ${labels[agent.id.toString()]}` : ""}

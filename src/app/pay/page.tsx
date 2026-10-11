@@ -31,6 +31,7 @@ import { parseMonAmount } from "@/lib/amounts";
 import { describeError } from "@/lib/errors";
 import { setRecipientName, useAddressBook, type BookEntry } from "@/lib/recipients";
 import { SiteNav } from "../site-nav";
+import { setSelectedAgentId, useSelectedAgentId } from "@/lib/selected-agent";
 
 // A payment that the vault refuses reverts very early, so a fixed gas limit is
 // plenty. It lets the "submit anyway" path reach the chain even though the
@@ -86,7 +87,6 @@ export default function AgentConsolePage() {
   const isOnMonadTestnet = chainId === MONAD_TESTNET_CHAIN_ID;
   const activeConnector = connectors[0];
 
-  const [chosenAgentId, setChosenAgentId] = useState<bigint>();
   const [recipientInput, setRecipientInput] = useState("");
   const [amountInput, setAmountInput] = useState("");
   const [isChecking, setIsChecking] = useState(false);
@@ -102,7 +102,7 @@ export default function AgentConsolePage() {
       loadAgents(publicClient!, registryAddress!, (agent) => sameAddress(agent.authorizedSigner, address)),
   });
   const agents = agentsQuery.data ?? [];
-  const agentId = chosenAgentId ?? agents[0]?.id;
+  const agentId = useSelectedAgentId(agents.map((candidate) => candidate.id));
   const agent = agents.find((candidate) => candidate.id === agentId);
   const book = useAddressBook(agentId);
   const namedBook = book.filter((entry) => entry.name.trim());
@@ -427,7 +427,7 @@ export default function AgentConsolePage() {
                       }`}
                       key={candidate.id.toString()}
                       onClick={() => {
-                        setChosenAgentId(candidate.id);
+                        setSelectedAgentId(candidate.id);
                         clearPreview();
                       }}
                     >

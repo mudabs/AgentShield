@@ -264,3 +264,12 @@ Phase 3 (agent). Owner decision: multi-model, Kimi as the base, OpenAI second, C
 - New `/book` (address book): pick an agent you own or sign for; look up any address (in book? approved onchain? owner or signer?); add, rename, or remove contacts (browser-only); table with live onchain approval per contact and explorer links. Removing a contact does not revoke approval.
 - New `src/app/site-nav.tsx`: shared navigation (Owner setup, Agent console, Address book) on `/agent`, `/pay`, `/book`.
 - Checks on a clean Linux copy: `tsc --noEmit`, `eslint src`, `next build` passed (routes `/`, `/agent`, `/pay`, `/book`, `/api/intent`).
+
+## 2026-10-10 — Agents vs contacts confusion fixed
+
+- Owner-reported: trying to add a new payee, the owner used the prominent "Create agent" form, which registered agents #2 and #3 (with the payee's address as their signer) instead of approving a recipient for agent #1. The address book then appeared empty because every page defaulted to the newest agent (#3).
+- `src/lib/selected-agent.ts`: one remembered agent selection shared by `/agent`, `/pay`, `/book`; falls back to the oldest available agent instead of the newest. A newly created agent becomes the selection once confirmed.
+- `/book`: owners can "Save and approve onchain" in one step, and approve or revoke any contact inline; non-owners can only save contacts. `useVaultWrite` and `StatusLine` are now exported from `owner-controls.tsx` for reuse.
+- `/agent`: the create form is now titled "Register an AI agent" with a note that payees belong under Approved recipients or the Address book.
+- Agents #2 and #3 remain registered onchain with no policy and no deposit, so the vault refuses every payment from them. No contract change.
+- Checks on a clean Linux copy: `tsc --noEmit`, `eslint src`, `next build` passed.

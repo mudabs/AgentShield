@@ -34,7 +34,7 @@ type VaultCall = {
  * state. The simulation is only a preview: the contract re-checks everything
  * when the real transaction executes, and that result is the one that counts.
  */
-function useVaultWrite(successText: string) {
+export function useVaultWrite(successText: string) {
   const queryClient = useQueryClient();
   const { address } = useAccount();
   const publicClient = usePublicClient({ chainId: MONAD_TESTNET_CHAIN_ID });
@@ -471,7 +471,7 @@ function ActionButton({
   );
 }
 
-function StatusLine({ status, hash }: { status?: Status; hash?: string }) {
+export function StatusLine({ status, hash }: { status?: Status; hash?: string }) {
   if (!status) return null;
   return (
     <Notice tone={status.tone}>

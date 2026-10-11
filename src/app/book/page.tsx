@@ -11,13 +11,15 @@ import { loadAgents, sameAddress, type RegisteredAgent } from "@/lib/agents";
 import { describeError } from "@/lib/errors";
 import { forgetRecipient, rememberRecipient, setRecipientName, useAddressBook } from "@/lib/recipients";
 import { SiteNav } from "../site-nav";
+import { StatusLine, useVaultWrite } from "../agent/owner-controls";
+import { setSelectedAgentId, useSelectedAgentId } from "@/lib/selected-agent";
 
 function shortAddress(value?: string) {
   return value ? `${value.slice(0, 6)}…${value.slice(-4)}` : "—";
 }
 
 export default function AddressBookPage() {
-  const { address, isConnected } = useAccount();
+  const { address, isConnected, chainId } = useAccount();
   const { connect, connectors, isPending: isConnecting } = useConnect();
   const { disconnect } = useDisconnect();
   const publicClient = usePublicClient({ chainId: MONAD_TESTNET_CHAIN_ID });
@@ -35,10 +37,10 @@ export default function AddressBookPage() {
       ),
   });
   const agents = agentsQuery.data ?? [];
-  const [chosenAgentId, setChosenAgentId] = useState<bigint>();
-  const agentId = chosenAgentId ?? agents[0]?.id;
+  const agentId = useSelectedAgentId(agents.map((candidate) => candidate.id));
   const agent = agents.find((candidate) => candidate.id === agentId);
   const isOwner = sameAddress(agent?.owner, address);
+  const canWrite = isOwner && chainId === MONAD_TESTNET_CHAIN_ID;
   const book = useAddressBook(agentId);
 
   return (
@@ -105,7 +107,7 @@ export default function AddressBookPage() {
                       : "border-white/15 bg-white/[0.04] text-zinc-300 hover:bg-white/10"
                   }`}
                   key={candidate.id.toString()}
-                  onClick={() => setChosenAgentId(candidate.id)}
+                  onClick={() => setSelectedAgentId(candidate.id)}
                 >
                   Agent #{candidate.id.toString()}
                 </button>
@@ -117,7 +119,7 @@ export default function AddressBookPage() {
 
             <section className="grid gap-5 pb-6 lg:grid-cols-2">
               <LookupCard agent={agent} agentId={agentId} book={book} />
-              <AddContactCard agent={agent} agentId={agentId} />
+              <AddContactCard agent={agent} agentId={agentId} canWrite={canWrite} isOwner={isOwner} />
             </section>
 
             <section className="pb-10">
@@ -149,7 +151,7 @@ export default function AddressBookPage() {
                       </thead>
                       <tbody>
                         {book.map((entry) => (
-                          <ContactRow agentId={agentId} entry={entry} key={entry.address} />
+                          <ContactRow agentId={agentId} canWrite={canWrite} entry={entry} isOwner={isOwner} key={entry.address} />
                         ))}
                       </tbody>
                     </table>
@@ -193,8 +195,19 @@ function StatusBadge({ approved }: { approved?: boolean }) {
   );
 }
 
-function ContactRow({ agentId, entry }: { agentId: bigint; entry: { address: Address; name: string } }) {
+function ContactRow({
+  agentId,
+  entry,
+  isOwner,
+  canWrite,
+}: {
+  agentId: bigint;
+  entry: { address: Address; name: string };
+  isOwner: boolean;
+  canWrite: boolean;
+}) {
   const { data: approved } = useApproval(agentId, entry.address);
+  const write = useVaultWrite("Approval updated onchain.");
   return (
     <tr className="border-t border-white/5">
       <td className="px-6 py-3">
@@ -226,8 +239,18 @@ function ContactRow({ agentId, entry }: { agentId: bigint; entry: { address: Add
       </td>
       <td className="px-6 py-3">
         <StatusBadge approved={approved} />
+        {write.status && write.status.tone !== "success" && <StatusLine hash={write.hash} status={write.status} />}
       </td>
-      <td className="px-6 py-3 text-right">
+      <td className="whitespace-nowrap px-6 py-3 text-right">
+        {isOwner && approved !== undefined && (
+          <button
+            className={`mr-4 text-xs font-semibold disabled:opacity-40 ${approved ? "text-rose-200 hover:text-rose-100" : "text-lime-200 hover:text-lime-100"}`}
+            disabled={!canWrite || write.busy}
+            onClick={() => void write.send({ functionName: "setRecipientApproval", args: [agentId, entry.address, !approved] })}
+          >
+            {write.busy ? "Working…" : approved ? "Revoke" : "Approve"}
+          </button>
+        )}
         <button
           className="text-xs text-zinc-500 hover:text-rose-200"
           onClick={() => forgetRecipient(agentId, entry.address)}
@@ -290,7 +313,18 @@ function LookupCard({
   );
 }
 
-function AddContactCard({ agentId, agent }: { agentId: bigint; agent: RegisteredAgent }) {
+function AddContactCard({
+  agentId,
+  agent,
+  isOwner,
+  canWrite,
+}: {
+  agentId: bigint;
+  agent: RegisteredAgent;
+  isOwner: boolean;
+  canWrite: boolean;
+}) {
+  const write = useVaultWrite("Saved and approved onchain. The agent may now pay this contact within its limits.");
   const [name, setName] = useState("");
   const [input, setInput] = useState("");
   const [saved, setSaved] = useState<string>();
@@ -299,7 +333,18 @@ function AddContactCard({ agentId, agent }: { agentId: bigint; agent: Registered
   if (!name.trim()) error = "Give the contact a name.";
   else if (!isAddress(value)) error = "Enter a valid address.";
   else if (getAddress(value) === zeroAddress) error = "The zero address cannot be a contact.";
-  else if (sameAddress(value, agent.authorizedSigner)) error = "That is the agent's own signer.";
+  else if (sameAddress(value, agent.authorizedSigner)) error = "That is the agent's own signer. It cannot be a recipient.";
+  else if (vaultAddress && sameAddress(value, vaultAddress)) error = "The vault itself cannot be a recipient.";
+
+  const save = (approve: boolean) => {
+    if (error) return;
+    const recipient = getAddress(value);
+    rememberRecipient(agentId, recipient, name.trim());
+    setSaved(name.trim());
+    setName("");
+    setInput("");
+    if (approve) void write.send({ functionName: "setRecipientApproval", args: [agentId, recipient, true] });
+  };
 
   return (
     <div className="rounded-3xl border border-white/10 bg-[#101419] p-6">
@@ -326,25 +371,37 @@ function AddContactCard({ agentId, agent }: { agentId: bigint; agent: Registered
           value={input}
         />
       </div>
-      <button
-        className="mt-3 w-full rounded-xl bg-lime-300 px-4 py-2.5 text-sm font-bold text-zinc-950 hover:bg-lime-200 disabled:cursor-not-allowed disabled:opacity-40"
-        disabled={Boolean(error)}
-        onClick={() => {
-          if (error) return;
-          rememberRecipient(agentId, getAddress(value), name.trim());
-          setSaved(name.trim());
-          setName("");
-          setInput("");
-        }}
-      >
-        Save contact
-      </button>
+      <div className={`mt-3 grid gap-2 ${isOwner ? "sm:grid-cols-2" : ""}`}>
+        {isOwner && (
+          <button
+            className="rounded-xl bg-lime-300 px-4 py-2.5 text-sm font-bold text-zinc-950 hover:bg-lime-200 disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={Boolean(error) || !canWrite || write.busy}
+            onClick={() => save(true)}
+          >
+            {write.busy ? "Working…" : "Save and approve onchain"}
+          </button>
+        )}
+        <button
+          className={`rounded-xl px-4 py-2.5 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40 ${
+            isOwner ? "border border-white/15 bg-white/[0.06] text-white hover:bg-white/10" : "bg-lime-300 text-zinc-950 hover:bg-lime-200"
+          }`}
+          disabled={Boolean(error) || write.busy}
+          onClick={() => save(false)}
+        >
+          Save contact only
+        </button>
+      </div>
+      <StatusLine hash={write.hash} status={write.status} />
       <p className="mt-2 text-xs leading-5 text-zinc-500">
-        {saved
-          ? `Saved "${saved}". It is not approved yet; the owner approves recipients on Owner setup.`
-          : (name || input) && error
-            ? error
-            : "Saving a contact does not let the agent pay it. Only an onchain approval does."}
+        {(name || input) && error
+          ? error
+          : write.status
+            ? ""
+            : saved
+              ? `Saved "${saved}" as a contact. It is not approved, so the vault will refuse payments to it.`
+              : isOwner
+                ? "Approving is an onchain transaction from your owner wallet. A saved-only contact cannot be paid."
+                : "Only the owner can approve contacts. A saved-only contact cannot be paid."}
       </p>
     </div>
   );
