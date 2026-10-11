@@ -3,19 +3,39 @@
 import { useMemo, useSyncExternalStore } from "react";
 import { getAddress, isAddress, type Address } from "viem";
 
-// The owner's address book for each agent, remembered in this browser: the
-// recipients they approved or checked, with an optional name for the AI to use.
-// Approval itself always lives onchain in the vault; any UI that shows
-// "approved" must read it from the chain, not from this list.
+// One address book of named contacts for this browser, shared by every agent.
+// A contact is only a label for an address. Whether a given agent may pay it is
+// decided per agent by the vault's onchain approval list; any UI that shows
+// "approved" must read that from the chain, not from this list.
+//
+// The `agentId` parameters below are kept for call-site compatibility; contacts
+// no longer depend on which agent is selected.
 
 export type BookEntry = { address: Address; name: string };
 
 const listeners = new Set<() => void>();
-const storageKey = (agentId: bigint) => `agentshield.recipients.${agentId.toString()}`;
+const STORAGE_KEY = "agentshield.contacts";
+const LEGACY_PREFIX = "agentshield.recipients.";
 
-function readRaw(agentId: bigint): string {
+/** Reads the shared book, merging any older per-agent lists into it once. */
+function readRaw(_agentId?: bigint): string {
+  void _agentId;
   try {
-    return window.localStorage.getItem(storageKey(agentId)) ?? "[]";
+    const current = window.localStorage.getItem(STORAGE_KEY);
+    if (current !== null) return current;
+    const merged: BookEntry[] = [];
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (!key?.startsWith(LEGACY_PREFIX)) continue;
+      for (const entry of parseBook(window.localStorage.getItem(key) ?? "[]")) {
+        const existing = merged.find((item) => item.address === entry.address);
+        if (!existing) merged.push(entry);
+        else if (!existing.name && entry.name) existing.name = entry.name;
+      }
+    }
+    const raw = JSON.stringify(merged);
+    window.localStorage.setItem(STORAGE_KEY, raw);
+    return raw;
   } catch {
     return "[]";
   }
@@ -39,9 +59,10 @@ function parseBook(raw: string): BookEntry[] {
   }
 }
 
-function writeBook(agentId: bigint, entries: BookEntry[]) {
+function writeBook(_agentId: bigint, entries: BookEntry[]) {
+  void _agentId;
   try {
-    window.localStorage.setItem(storageKey(agentId), JSON.stringify(entries));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
   } catch {
     // Storage unavailable: onchain approvals still happen, they just are not listed here.
   }

@@ -110,10 +110,11 @@ export default function AddressBookPage() {
                   onClick={() => setSelectedAgentId(candidate.id)}
                 >
                   Agent #{candidate.id.toString()}
+                  <span className="ml-1 font-mono font-normal opacity-70">· signer {shortAddress(candidate.authorizedSigner)}</span>
                 </button>
               ))}
               <span className="text-xs text-zinc-500">
-                You are this agent&apos;s {isOwner ? "owner" : "signer"}.
+                Approvals below are for Agent #{agentId.toString()}. You are its {isOwner ? "owner" : "signer"}.
               </span>
             </div>
 
@@ -126,7 +127,7 @@ export default function AddressBookPage() {
               <div className="overflow-hidden rounded-3xl border border-white/10 bg-[#101419]">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-6 py-4">
                   <h2 className="text-lg font-semibold text-white">
-                    Agent #{agentId.toString()} contacts <span className="text-zinc-500">({book.length})</span>
+                    Your contacts <span className="text-zinc-500">({book.length})</span>
                   </h2>
                   {isOwner && (
                     <Link className="text-xs text-lime-200 underline-offset-4 hover:underline" href="/agent">
@@ -145,7 +146,7 @@ export default function AddressBookPage() {
                         <tr>
                           <th className="px-6 py-3 font-medium">Name</th>
                           <th className="px-6 py-3 font-medium">Address</th>
-                          <th className="px-6 py-3 font-medium">Status (onchain)</th>
+                          <th className="px-6 py-3 font-medium">Agent #{agentId.toString()} may pay (onchain)</th>
                           <th className="px-6 py-3 font-medium" />
                         </tr>
                       </thead>
@@ -159,7 +160,9 @@ export default function AddressBookPage() {
                 )}
               </div>
               <p className="mt-3 text-xs leading-5 text-zinc-500">
-                Contacts are stored in this browser only. Removing a contact here does not revoke its onchain approval.
+                One contact list is shared by all your agents and stored in this browser only. Approval is per agent and
+                lives onchain: switch agents above to see each one&apos;s approvals. Removing a contact does not revoke
+                its approval.
               </p>
             </section>
           </>
@@ -301,7 +304,7 @@ function LookupCard({
             <dd className="text-white">{contact ? `Yes, as "${contact.name || "unnamed"}"` : "No"}</dd>
           </div>
           <div className="flex items-center justify-between gap-3">
-            <dt className="text-zinc-500">Agent may pay it</dt>
+            <dt className="text-zinc-500">Agent #{agentId.toString()} may pay it</dt>
             <dd>
               <StatusBadge approved={approved} />
             </dd>

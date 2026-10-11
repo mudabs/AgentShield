@@ -273,3 +273,11 @@ Phase 3 (agent). Owner decision: multi-model, Kimi as the base, OpenAI second, C
 - `/agent`: the create form is now titled "Register an AI agent" with a note that payees belong under Approved recipients or the Address book.
 - Agents #2 and #3 remain registered onchain with no policy and no deposit, so the vault refuses every payment from them. No contract change.
 - Checks on a clean Linux copy: `tsc --noEmit`, `eslint src`, `next build` passed.
+
+## 2026-10-10 — One shared contact list
+
+- Owner-reported: "Store" (`0x9F3B…C93d`) was saved and approved for agent #2, so agent #1 (the funded agent the owner pays with) had no such contact and the console showed "0 of 1 named".
+- `src/lib/recipients.ts`: contacts are now one browser-wide list (`agentshield.contacts`) shared by all agents; older per-agent lists are merged into it on first read. Approval remains per agent and onchain.
+- `/book`: agent chips show each agent's signer; the table column reads "Agent #N may pay (onchain)"; copy explains shared contacts vs per-agent approval.
+- Note: Store's onchain approval is still only on agent #2; the owner must approve it for agent #1.
+- Checks: `tsc --noEmit`, `eslint src` passed on a clean copy.
