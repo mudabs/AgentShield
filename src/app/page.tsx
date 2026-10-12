@@ -14,7 +14,7 @@ const steps = [
   {
     label: "2 · Agent",
     title: "Ask in plain language",
-    body: "Kimi, OpenAI or Claude turns “pay Shop 0.05 MON for coffee” into a structured request. The model only sees contact names, never addresses or keys.",
+    body: "An AI model such as OpenAI or Kimi turns “pay Shop 0.05 MON for coffee” into a structured request. The model only sees contact names, never addresses or keys.",
     href: "/pay",
     cta: "Agent console",
   },
