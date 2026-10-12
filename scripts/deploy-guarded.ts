@@ -1,4 +1,5 @@
 import { network } from "hardhat";
+import { getAddress, type Address } from "viem";
 
 const { viem } = await network.create();
 const publicClient = await viem.getPublicClient();
@@ -6,7 +7,7 @@ const [deployer] = await viem.getWalletClients();
 
 const registry = await viem.deployContract("AgentRegistry");
 const vault = await viem.deployContract("AgentGuardVault", [registry.address]);
-const linkedRegistry = await vault.read.registry();
+const linkedRegistry = getAddress((await vault.read.registry()) as Address);
 
 if (linkedRegistry.toLowerCase() !== registry.address.toLowerCase()) {
   throw new Error(`Vault registry mismatch: expected ${registry.address}, got ${linkedRegistry}`);

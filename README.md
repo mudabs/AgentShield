@@ -42,6 +42,57 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+## Deploy to Vercel with continuous deployment
+
+The repository includes [`vercel.json`](vercel.json) for a reproducible Next.js
+build and [GitHub CI](.github/workflows/ci.yml) for linting, typechecking,
+contract tests, and the production build.
+
+To create the Vercel project, import the GitHub repository
+[`mudabs/AgentShield`](https://github.com/mudabs/AgentShield) from the Vercel
+dashboard. Keep the project root at the repository root, use the Next.js
+framework preset, and set `master` as the Production Branch. Vercel's Git
+integration then provides continuous deployment automatically:
+
+- pushes to non-production branches and pull requests create Preview deployments;
+- pushes and merges to `master` create Production deployments.
+
+Add the following variables in Vercel Project Settings → Environment Variables.
+Use Preview and Production scopes as appropriate; never commit their values.
+
+Public browser configuration:
+
+```text
+NEXT_PUBLIC_MONAD_RPC_URL
+NEXT_PUBLIC_PROBE_CONTRACT_ADDRESS
+NEXT_PUBLIC_REGISTRY_CONTRACT_ADDRESS
+NEXT_PUBLIC_VAULT_CONTRACT_ADDRESS
+```
+
+Server-only configuration:
+
+```text
+MONAD_TESTNET_RPC_URL
+KIMI_API_KEY or OPENAI_API_KEY or ANTHROPIC_API_KEY
+DEMO_AGENT_PRIVATE_KEY
+DEMO_AGENT_ID
+DEMO_ADDRESS_BOOK
+UPSTASH_REDIS_REST_URL
+UPSTASH_REDIS_REST_TOKEN
+```
+
+The rate-limit variables (`INTENT_RATE_LIMIT_PER_MINUTE`,
+`ARENA_RATE_LIMIT_PER_MINUTE`, and `ARENA_DAILY_ATTEMPTS`) are optional. Keep
+`PRIVATE_KEY`, `E2E_AGENT_PRIVATE_KEY`, and `E2E_SHOP_PRIVATE_KEY` out of
+Vercel; they are for local testnet scripts only. The demo agent key is also a
+testnet-only key and should be scoped to Production unless you intentionally
+want Preview deployments to spend testnet MON.
+
+After importing the repository, push a branch or open a pull request to verify
+the Preview deployment, then merge to `master` for the first Production
+deployment. Vercel will show the deployment URL and build logs in the GitHub
+check and in the Vercel dashboard.
+
 ## Compile and test the contract
 
 ```bash

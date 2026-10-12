@@ -1,5 +1,5 @@
 import { network } from "hardhat";
-import { formatEther, getAddress, isAddress } from "viem";
+import { formatEther, getAddress, isAddress, type Address } from "viem";
 
 /**
  * Withdraws every agent balance the deployer owns from a vault back to the deployer.
@@ -15,15 +15,16 @@ const { viem } = await network.create();
 const publicClient = await viem.getPublicClient();
 const [owner] = await viem.getWalletClients();
 const vault = await viem.getContractAt("AgentGuardVault", getAddress(target));
-const registry = await viem.getContractAt("AgentRegistry", await vault.read.registry());
+const registryAddress = getAddress((await vault.read.registry()) as Address);
+const registry = await viem.getContractAt("AgentRegistry", registryAddress);
 
-const nextAgentId = await registry.read.nextAgentId();
+const nextAgentId = (await registry.read.nextAgentId()) as bigint;
 console.log(`Vault ${vault.address} · registry ${registry.address} · owner ${owner.account.address}`);
 
 let total = BigInt(0);
 for (let id = BigInt(1); id < nextAgentId; id += BigInt(1)) {
-  const agentOwner = await registry.read.ownerOf([id]);
-  const balance = await vault.read.vaultBalance([id]);
+  const agentOwner = getAddress((await registry.read.ownerOf([id])) as Address);
+  const balance = (await vault.read.vaultBalance([id])) as bigint;
   if (agentOwner.toLowerCase() !== owner.account.address.toLowerCase()) {
     console.log(`Agent #${id}: owned by someone else, skipped.`);
     continue;
