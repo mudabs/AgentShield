@@ -2,7 +2,7 @@ import {
   buildSystemPrompt,
   MAX_REQUEST_LENGTH,
   parseModelJson,
-  resolveIntent,
+  resolveIntents,
   sanitizeAddressBook,
 } from "@/lib/ai/intent";
 import { complete, isProviderId, listProviders, ProviderError } from "@/lib/ai/providers";
@@ -74,11 +74,14 @@ export async function POST(request: Request) {
   }
 
   const parsed = parseModelJson(completion.text);
-  const resolved = resolveIntent(parsed, addressBook, userRequest);
+  const resolved = resolveIntents(parsed, addressBook, userRequest);
   const label = listProviders().find((entry) => entry.id === provider)?.label ?? provider;
 
   return Response.json({
     ...resolved,
+    // The first payment is also returned in the original single-payment fields so
+    // older callers (like the e2e script) keep working.
+    ...(resolved.ok ? resolved.payments[0] : {}),
     // Declared metadata: what this server asked for and got back. It is not a
     // cryptographic proof of which model produced the text.
     provider,

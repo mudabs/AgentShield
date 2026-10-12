@@ -324,3 +324,17 @@ Results:
 - Kimi: 0.05 MON after the limit → refused, DailyLimitExceeded.
 
 Gaps seen: home page still in probe mode; session history disappears on refresh; Kimi interpretation takes about 19 s; each agent payment costs about 0.018 MON gas (gas limit is charged on Monad).
+
+## 2026-10-12 · History, receipts, owner controls, home page, multi-payment
+
+- **Commitment request IDs.** The `requestId` sent to `executePayment` is now `keccak256` of a canonical request envelope: chain, vault, agent, recipient, amount, a random salt, and (for AI requests) the prompt, declared provider and model, memo and recipient name. The onchain PaymentExecuted event therefore commits to the AI context. `src/lib/receipts.ts`, tests in `test/Receipts.test.ts`.
+- **Persistent history.** Attempts are stored per vault in localStorage (`src/lib/history.ts`) and survive reloads. Paid and blocked entries link to a receipt.
+- **Public receipt page** `/receipt/[tx]`. Reads the transaction, receipt, block and PaymentExecuted log from Monad; for reverted payments it replays the call to show the vault's reason. Request details travel in the link fragment (`#e=…`, never sent to a server) and are shown as verified only if they hash to the onchain request ID. Wrapped in Suspense for Cache Components.
+- **Owner controls.** Withdraw card (to the owner wallet only, with "All") and Retire card (registry `setActive`). Signer rotation card from the walkthrough stays.
+- **Home page** replaced: problem, three-step flow, contract guarantees, deployed addresses, honest limits.
+- **Gas.** Normal agent payments now use the node's estimate plus 25% instead of the wallet's padding (Monad charges the gas limit).
+- **Multi-payment requests.** The model may return `{"action":"pay","payments":[…]}` with up to 5 items; `resolveIntents` resolves them all or rejects the whole request. The console previews each payment, checks the running total against today's remaining limit and the vault balance, then sends them one by one (one MetaMask prompt each) and stops at the first failure. Each payment's envelope records "n of m". `/api/intent` still returns the first payment in the old fields.
+
+Checks: tsc and eslint clean, 25 unit tests pass, `next build` passes.
+
+Browser retest (Chrome + MetaMask, Agent #8): new home page renders; OpenAI turned "Pay Shop 0.02 MON for milk and Store 0.03 MON for bread" into 2 payments, both previewed as allowed and paid onchain as separate transactions; history survived a reload; the receipt page verified the request details against the onchain request ID; editing the prompt in the link made the receipt report a mismatch; owner withdrew 0.01 MON (vault 0.10 to 0.09).

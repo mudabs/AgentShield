@@ -21,7 +21,13 @@ type Tone = "info" | "success" | "warning" | "error";
 type Status = { tone: Tone; text: string };
 
 type VaultCall = {
-  functionName: "configurePolicy" | "setRecipientApproval" | "setPaused" | "deposit" | "setAuthorizedSigner";
+  functionName:     | "configurePolicy"
+    | "setRecipientApproval"
+    | "setPaused"
+    | "deposit"
+    | "withdraw"
+    | "setAuthorizedSigner"
+    | "setActive";
   args: readonly unknown[];
   value?: bigint;
   /** Which contract to call. Defaults to the vault; signer rotation lives on the registry. */
@@ -155,8 +161,10 @@ export function OwnerControls({ agentId, canWrite }: { agentId: bigint; canWrite
         />
         <RecipientsCard agentId={agentId} agentSigner={agent.authorizedSigner} canWrite={canWrite} />
         <DepositCard agentId={agentId} canWrite={canWrite} owner={address} />
+        <WithdrawCard agentId={agentId} canWrite={canWrite} owner={address} />
         <PauseCard agentId={agentId} canWrite={canWrite} paused={paused} />
         <SignerCard agentId={agentId} canWrite={canWrite} currentSigner={agent.authorizedSigner} owner={address} />
+        <LifecycleCard active={agent.active} agentId={agentId} canWrite={canWrite} />
       </div>
     </section>
   );
@@ -410,6 +418,79 @@ function DepositCard({ agentId, owner, canWrite }: { agentId: bigint; owner: Add
   );
 }
 
+/** Owner-only: move funds out of the vault back to the owner's wallet. */
+function WithdrawCard({ agentId, owner, canWrite }: { agentId: bigint; owner: Address; canWrite: boolean }) {
+  const [input, setInput] = useState("");
+  const { data: balance } = useReadContract({
+    address: vaultAddress,
+    abi: vaultAbi,
+    functionName: "vaultBalance",
+    args: [agentId],
+    chainId: MONAD_TESTNET_CHAIN_ID,
+    query: { enabled: Boolean(vaultAddress) },
+  });
+  const write = useVaultWrite("Withdrawn. The MON is back in your wallet.");
+  const amount = parseMonAmount(input);
+  let validation: string | undefined = input.trim() ? (amount.ok ? undefined : amount.message) : undefined;
+  if (amount.ok && balance !== undefined && amount.wei > balance) {
+    validation = `The vault only holds ${formatEther(balance)} MON for this agent.`;
+  }
+  return (
+    <Card eyebrow="Withdraw" title="Take funds back out">
+      <p className="text-xs leading-5 text-zinc-500">
+        In the vault for agent #{agentId.toString()}: {balance === undefined ? "—" : `${formatEther(balance)} MON`}.
+        Only you can withdraw, and it always goes to your owner wallet. The agent has no way to do this.
+      </p>
+      <div className="mt-4 flex items-end gap-2">
+        <div className="flex-1">
+          <AmountField label="Amount (MON)" onChange={setInput} placeholder="0.1" value={input} />
+        </div>
+        <button
+          className="mb-0.5 rounded-xl border border-white/15 bg-white/[0.06] px-3 py-2.5 text-xs font-semibold text-white hover:bg-white/10 disabled:opacity-40"
+          disabled={!balance}
+          onClick={() => balance !== undefined && setInput(formatEther(balance))}
+        >
+          All
+        </button>
+      </div>
+      {validation && <p className="mt-2 text-xs text-rose-300">{validation}</p>}
+      <StatusLine hash={write.hash} status={write.status} />
+      <ActionButton
+        disabled={!canWrite || write.busy || !amount.ok || Boolean(validation)}
+        label={write.busy ? "Working…" : "Withdraw to my wallet"}
+        onClick={() => {
+          if (!amount.ok) return;
+          void write.send({ functionName: "withdraw", args: [agentId, owner, amount.wei] });
+        }}
+      />
+    </Card>
+  );
+}
+
+/**
+ * Registry-level switch. An inactive agent's key is no longer an authorized signer, so
+ * every payment is refused, like pause, but it also signals the agent is retired.
+ */
+function LifecycleCard({ agentId, active, canWrite }: { agentId: bigint; active: boolean; canWrite: boolean }) {
+  const write = useVaultWrite(active ? "Agent deactivated." : "Agent reactivated.");
+  return (
+    <Card eyebrow="Retire" title={active ? "Agent is active" : "Agent is deactivated"}>
+      <p className="text-xs leading-5 text-zinc-500">
+        Deactivating retires the agent in the registry: its key stops being an authorized signer, so the vault
+        refuses all its payments. Pause is the quick emergency stop; deactivate is for an agent you no longer use.
+        Withdraw its funds first if you want them back. You can reactivate later.
+      </p>
+      <StatusLine hash={write.hash} status={write.status} />
+      <ActionButton
+        danger={active}
+        disabled={!canWrite || write.busy}
+        label={write.busy ? "Working…" : active ? "Deactivate agent" : "Reactivate agent"}
+        onClick={() => void write.send({ contract: "registry", functionName: "setActive", args: [agentId, !active] })}
+      />
+    </Card>
+  );
+}
+
 function PauseCard({ agentId, paused, canWrite }: { agentId: bigint; paused?: boolean; canWrite: boolean }) {
   const write = useVaultWrite(paused ? "Agent paused." : "Agent resumed.");
   return (
@@ -458,7 +539,7 @@ function SignerCard({
     } else if (vaultAddress && next === getAddress(vaultAddress)) validation = "The vault cannot be a signer.";
   }
   return (
-    <div className="md:col-span-2">
+    <div className="grid">
       <Card eyebrow="Agent key" title="Change the agent's signer">
         <p className="text-xs leading-5 text-zinc-500">
           Current signer: <span className="font-mono text-zinc-300">{currentSigner}</span>. Use this if the

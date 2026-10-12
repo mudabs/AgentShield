@@ -19,7 +19,6 @@ import {
   isAddress,
   parseEther,
   parseEventLogs,
-  toHex,
   type Address,
   type Hash,
   type Hex,
@@ -32,6 +31,8 @@ import { describeError } from "@/lib/errors";
 import { setRecipientName, useAddressBook, type BookEntry } from "@/lib/recipients";
 import { SiteNav } from "../site-nav";
 import { setSelectedAgentId, useSelectedAgentId } from "@/lib/selected-agent";
+import { addHistory, useHistory, type HistoryOutcome, type HistoryRecord } from "@/lib/history";
+import { createEnvelope, encodeEnvelope, envelopeRequestId, type RequestEnvelope } from "@/lib/receipts";
 
 // A payment that the vault refuses reverts very early, so a fixed gas limit is
 // plenty. It lets the "submit anyway" path reach the chain even though the
@@ -40,8 +41,8 @@ const FORCED_SUBMIT_GAS = BigInt(150_000);
 const LOW_GAS_WARNING = parseEther("0.02");
 
 /** Declared AI context for a request: what was typed and which model interpreted it. */
-type Source = { providerLabel: string; model: string; prompt: string; memo?: string; recipientName?: string };
-type Request = { requestId: Hex; recipient: Address; amountWei: bigint; source?: Source };
+type Source = { providerLabel: string; model: string; prompt: string; memo?: string; recipientName?: string; part?: string };
+type Request = { requestId: Hex; recipient: Address; amountWei: bigint; source?: Source; envelope: RequestEnvelope };
 
 type ProviderInfo = { id: string; label: string; model: string; configured: boolean };
 type Interpretation =
@@ -49,6 +50,8 @@ type Interpretation =
       ok: true;
       intent: { recipient: Address; amountWei: string; memo?: string };
       recipientName?: string;
+      /** Every payment in the request, in order. One entry for a normal request. */
+      payments: { intent: { recipient: Address; amountWei: string; memo?: string }; recipientName?: string }[];
       providerLabel: string;
       model: string;
       latencyMs: number;
@@ -56,22 +59,23 @@ type Interpretation =
     }
   | { ok: false; message: string; providerLabel?: string; model?: string; rawOutput?: string };
 type Preview = Request & ({ verdict: "allowed" } | { verdict: "refused"; reason: string });
+type BatchState = "ready" | "refused" | "sending" | "paid" | "blocked" | "failed" | "skipped";
+type BatchItem = Request & { state: BatchState; reason?: string };
 
 type Attempt = Request & {
-  outcome: "paid" | "refused-not-sent" | "reverted-onchain" | "failed";
+  outcome: HistoryOutcome;
   hash?: Hash;
   note: string;
   policyVersion?: bigint;
   dayIndex?: bigint;
 };
 
+// Normal sends use the node's gas estimate plus this margin instead of the wallet's
+// default padding. Monad charges for the gas limit, so a tight limit is cheaper.
+const GAS_MARGIN_PERCENT = BigInt(125);
+
 function shortAddress(value?: string) {
   return value ? `${value.slice(0, 6)}…${value.slice(-4)}` : "—";
-}
-
-/** A fresh, random 32-byte ID for each request so the vault can reject duplicates. */
-function newRequestId(): Hex {
-  return toHex(crypto.getRandomValues(new Uint8Array(32)));
 }
 
 function utcDate(dayIndex: bigint) {
@@ -92,7 +96,8 @@ export default function AgentConsolePage() {
   const [isChecking, setIsChecking] = useState(false);
   const [preview, setPreview] = useState<Preview>();
   const [isConfirming, setIsConfirming] = useState(false);
-  const [attempts, setAttempts] = useState<Attempt[]>([]);
+  const [batch, setBatch] = useState<BatchItem[]>();
+  const [isSendingBatch, setIsSendingBatch] = useState(false);
 
   // Agents whose authorized signer is the connected account.
   const agentsQuery = useQuery({
@@ -150,20 +155,63 @@ export default function AgentConsolePage() {
   // reverted transaction, which would hide the fact that it was mined and refused.
   const { isPending: isAwaitingWallet, writeContractAsync } = useWriteContract();
 
-  const recordAttempt = (attempt: Attempt) => setAttempts((previous) => [attempt, ...previous]);
+  const history = useHistory(agentId);
+  const recordAttempt = (attempt: Attempt) =>
+    addHistory({
+      envelope: attempt.envelope,
+      outcome: attempt.outcome,
+      note: attempt.note,
+      hash: attempt.hash,
+      policyVersion: attempt.policyVersion?.toString(),
+      dayIndex: attempt.dayIndex?.toString(),
+    });
+
+  const [perPaymentLimit, dailyLimit, spentToday, , policyVersion, paused] = policy ?? [];
+  const remainingToday =
+    dailyLimit !== undefined && spentToday !== undefined && dailyLimit > spentToday
+      ? dailyLimit - spentToday
+      : BigInt(0);
 
   const amount = parseMonAmount(amountInput);
   const recipientValid = isAddress(recipientInput.trim());
-  const busy = isChecking || isAwaitingWallet || isConfirming;
+  const busy = isChecking || isAwaitingWallet || isConfirming || isSendingBatch;
   const canPreview = isConnected && isOnMonadTestnet && agentId !== undefined && !busy;
   const canCheck = canPreview && recipientValid && amount.ok;
 
-  const clearPreview = () => setPreview(undefined);
+  const clearPreview = () => {
+    setPreview(undefined);
+    setBatch(undefined);
+  };
+
+  /**
+   * The request ID is the hash of everything about this request, including the
+   * prompt and declared model for AI requests, so the onchain record commits to it.
+   */
+  const buildRequest = (recipient: Address, amountWei: bigint, source?: Source): Request | undefined => {
+    if (!vaultAddress || agentId === undefined) return undefined;
+    const envelope = createEnvelope({
+      chainId: MONAD_TESTNET_CHAIN_ID,
+      vault: vaultAddress,
+      agentId,
+      recipient,
+      amountWei,
+      source: source && {
+        provider: source.providerLabel,
+        model: source.model,
+        prompt: source.prompt,
+        memo: source.memo,
+        recipientName: source.recipientName,
+        part: source.part,
+      },
+    });
+    return { requestId: envelopeRequestId(envelope), recipient, amountWei, source, envelope };
+  };
 
   /** Step 1: ask the vault, without sending anything, whether it would allow this payment. */
   const runCheck = async (recipient: Address, amountWei: bigint, source?: Source) => {
     if (!canPreview || !publicClient || !vaultAddress || !address || agentId === undefined) return;
-    const request: Request = { requestId: newRequestId(), recipient, amountWei, source };
+    const request = buildRequest(recipient, amountWei, source);
+    if (!request) return;
     setIsChecking(true);
     try {
       await publicClient.simulateContract({
@@ -205,7 +253,11 @@ export default function AgentConsolePage() {
       });
       const result = (await response.json()) as Record<string, unknown>;
       if (result.ok === true) {
-        setInterpretation({ ...(result as Omit<Extract<Interpretation, { ok: true }>, "prompt">), ok: true, prompt });
+        const ok = result as Omit<Extract<Interpretation, { ok: true }>, "prompt">;
+        const payments = Array.isArray(ok.payments) && ok.payments.length > 0
+          ? ok.payments
+          : [{ intent: ok.intent, recipientName: ok.recipientName }];
+        setInterpretation({ ...ok, payments, ok: true, prompt });
       } else {
         setInterpretation({
           ok: false,
@@ -229,6 +281,10 @@ export default function AgentConsolePage() {
    */
   const applyInterpretation = () => {
     if (!interpretation?.ok) return;
+    if (interpretation.payments.length > 1) {
+      void runBatchCheck(interpretation);
+      return;
+    }
     const { intent } = interpretation;
     const amountWei = BigInt(intent.amountWei);
     setInterpretation(undefined);
@@ -245,10 +301,26 @@ export default function AgentConsolePage() {
    * Step 2: send the real transaction. The contract re-checks everything at execution.
    * Every path ends by closing the preview and recording exactly one attempt.
    */
-  const submit = async (forceOnchain: boolean) => {
-    if (!preview || !vaultAddress || !publicClient || !address || agentId === undefined) return;
-    const request = preview;
+  const sendOne = async (request: Request, forceOnchain: boolean, previewReason?: string): Promise<HistoryOutcome> => {
+    if (!vaultAddress || !publicClient || !address || agentId === undefined) return "failed";
+    let outcome: HistoryOutcome = "failed";
     const args = [agentId, request.requestId, request.recipient, request.amountWei] as const;
+
+    let gas = forceOnchain ? FORCED_SUBMIT_GAS : undefined;
+    if (!forceOnchain) {
+      try {
+        const estimate = await publicClient.estimateContractGas({
+          account: address,
+          address: vaultAddress,
+          abi: vaultAbi,
+          functionName: "executePayment",
+          args,
+        });
+        gas = (estimate * GAS_MARGIN_PERCENT) / BigInt(100);
+      } catch {
+        // Let the wallet estimate; the vault still decides.
+      }
+    }
 
     let hash: Hash;
     try {
@@ -258,12 +330,11 @@ export default function AgentConsolePage() {
         functionName: "executePayment",
         args,
         chainId: MONAD_TESTNET_CHAIN_ID,
-        ...(forceOnchain ? { gas: FORCED_SUBMIT_GAS } : {}),
+        ...(gas ? { gas } : {}),
       });
     } catch (error) {
       recordAttempt({ ...request, outcome: "failed", note: `Nothing was sent. ${describeError(error as Error)}` });
-      setPreview(undefined);
-      return;
+      return "failed";
     }
 
     setIsConfirming(true);
@@ -275,6 +346,7 @@ export default function AgentConsolePage() {
           eventName: "PaymentExecuted",
           logs: receipt.logs.filter((log) => sameAddress(log.address, vaultAddress)),
         });
+        outcome = "paid";
         recordAttempt({
           ...request,
           outcome: "paid",
@@ -299,7 +371,8 @@ export default function AgentConsolePage() {
         } catch (replayError) {
           reason = describeError(replayError as Error);
         }
-        reason ??= request.verdict === "refused" ? `${request.reason} (from the preview)` : "reason unavailable";
+        reason ??= previewReason ? `${previewReason} (from the preview)` : "reason unavailable";
+        outcome = "reverted-onchain";
         recordAttempt({
           ...request,
           outcome: "reverted-onchain",
@@ -315,16 +388,118 @@ export default function AgentConsolePage() {
         note: `Sent, but the result could not be confirmed yet: ${describeError(error as Error)} Check the transaction link.`,
       });
     } finally {
-      // The request reached the chain, so it is finished: clear the manual form to
-      // avoid sending the same payment again by accident.
       setIsConfirming(false);
-      setPreview(undefined);
-      setRecipientInput("");
-      setAmountInput("");
       void refetchPolicy();
       void refetchVaultBalance();
       void refetchGasBalance();
     }
+    return outcome;
+  };
+
+  /** Sends the single previewed payment, then closes it and clears the manual form. */
+  const submit = async (forceOnchain: boolean) => {
+    if (!preview) return;
+    const request = preview;
+    await sendOne(request, forceOnchain, request.verdict === "refused" ? request.reason : undefined);
+    // The request reached the chain or failed for good: clear the form so the same
+    // payment is not sent again by accident.
+    setPreview(undefined);
+    setRecipientInput("");
+    setAmountInput("");
+  };
+
+  /**
+   * Several payments from one sentence. Each is previewed against the vault, and the
+   * running total is checked against today's remaining limit and the vault balance,
+   * because the vault checks each payment against the state left by the previous one.
+   */
+  const runBatchCheck = async (result: Extract<Interpretation, { ok: true }>) => {
+    if (!canPreview || !publicClient || !vaultAddress || !address || agentId === undefined) return;
+    setInterpretation(undefined);
+    setPreview(undefined);
+    setIsChecking(true);
+    const items: BatchItem[] = [];
+    let runningTotal = BigInt(0);
+    const total = result.payments.length;
+    try {
+      for (const [index, payment] of result.payments.entries()) {
+        const request = buildRequest(getAddress(payment.intent.recipient), BigInt(payment.intent.amountWei), {
+          providerLabel: result.providerLabel,
+          model: result.model,
+          prompt: result.prompt,
+          memo: payment.intent.memo,
+          recipientName: payment.recipientName,
+          part: `${index + 1} of ${total}`,
+        });
+        if (!request) return;
+        let reason: string | undefined;
+        try {
+          await publicClient.simulateContract({
+            account: address,
+            address: vaultAddress,
+            abi: vaultAbi,
+            functionName: "executePayment",
+            args: [agentId, request.requestId, request.recipient, request.amountWei],
+          });
+        } catch (error) {
+          reason = describeError(error as Error);
+        }
+        if (!reason) {
+          const nextTotal = runningTotal + request.amountWei;
+          if (policy && nextTotal > remainingToday) {
+            reason = "Together with the earlier payments in this request, this would go over today's limit.";
+          } else if (vaultBalance !== undefined && nextTotal > vaultBalance) {
+            reason = "Together with the earlier payments in this request, this is more than the vault holds.";
+          } else {
+            runningTotal = nextTotal;
+          }
+        }
+        items.push({ ...request, state: reason ? "refused" : "ready", reason });
+      }
+      setBatch(items);
+    } finally {
+      setIsChecking(false);
+    }
+  };
+
+  /** Sends the allowed payments one by one, each its own transaction. Stops at the first problem. */
+  const sendBatch = async () => {
+    if (!batch) return;
+    setIsSendingBatch(true);
+    const items = batch.map((item) => ({ ...item }));
+    let stopped = false;
+    try {
+      for (const item of items) {
+        if (item.state === "refused") {
+          recordAttempt({ ...item, outcome: "refused-not-sent", note: `Not sent. ${item.reason}` });
+          continue;
+        }
+        if (stopped) {
+          item.state = "skipped";
+          continue;
+        }
+        item.state = "sending";
+        setBatch(items.map((entry) => ({ ...entry })));
+        const outcome = await sendOne(item, false);
+        item.state = outcome === "paid" ? "paid" : outcome === "reverted-onchain" ? "blocked" : "failed";
+        if (outcome !== "paid") stopped = true;
+        setBatch(items.map((entry) => ({ ...entry })));
+      }
+    } finally {
+      setIsSendingBatch(false);
+      setBatch(items.map((entry) => ({ ...entry })));
+    }
+  };
+
+  const discardBatch = () => {
+    // Refused items are recorded once: here if nothing was sent, or by sendBatch.
+    const started = batch?.some((item) => item.state !== "ready" && item.state !== "refused");
+    if (!started) {
+      batch?.filter((item) => item.state === "refused").forEach((item) =>
+        recordAttempt({ ...item, outcome: "refused-not-sent", note: `Not sent. ${item.reason}` }),
+      );
+    }
+    setBatch(undefined);
   };
 
   const declineToSend = () => {
@@ -333,11 +508,6 @@ export default function AgentConsolePage() {
     setPreview(undefined);
   };
 
-  const [perPaymentLimit, dailyLimit, spentToday, , policyVersion, paused] = policy ?? [];
-  const remainingToday =
-    dailyLimit !== undefined && spentToday !== undefined && dailyLimit > spentToday
-      ? dailyLimit - spentToday
-      : BigInt(0);
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#080a0d] text-zinc-100">
@@ -490,15 +660,39 @@ export default function AgentConsolePage() {
 
                 {interpretation?.ok && (
                   <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3 text-xs leading-5">
-                    <p className="text-zinc-300">
-                      <span className="font-semibold text-white">
-                        {interpretation.providerLabel} ({interpretation.model})
-                      </span>{" "}
-                      understood: pay <span className="font-mono text-white">{formatEther(BigInt(interpretation.intent.amountWei))} MON</span> to{" "}
-                      <span className="text-white">{interpretation.recipientName ?? "an address you typed"}</span>{" "}
-                      <span className="font-mono text-zinc-400">({shortAddress(interpretation.intent.recipient)})</span>
-                      {interpretation.intent.memo ? ` for "${interpretation.intent.memo}"` : ""}.
-                    </p>
+                    {interpretation.payments.length > 1 ? (
+                      <>
+                        <p className="text-zinc-300">
+                          <span className="font-semibold text-white">
+                            {interpretation.providerLabel} ({interpretation.model})
+                          </span>{" "}
+                          understood {interpretation.payments.length} payments, totalling{" "}
+                          <span className="font-mono text-white">
+                            {formatEther(interpretation.payments.reduce((sum, item) => sum + BigInt(item.intent.amountWei), BigInt(0)))} MON
+                          </span>
+                          :
+                        </p>
+                        <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-zinc-300">
+                          {interpretation.payments.map((item, index) => (
+                            <li key={index}>
+                              <span className="font-mono text-white">{formatEther(BigInt(item.intent.amountWei))} MON</span> to{" "}
+                              <span className="text-white">{item.recipientName ?? "an address you typed"}</span>
+                              {item.intent.memo ? ` for "${item.intent.memo}"` : ""}
+                            </li>
+                          ))}
+                        </ol>
+                      </>
+                    ) : (
+                      <p className="text-zinc-300">
+                        <span className="font-semibold text-white">
+                          {interpretation.providerLabel} ({interpretation.model})
+                        </span>{" "}
+                        understood: pay <span className="font-mono text-white">{formatEther(BigInt(interpretation.intent.amountWei))} MON</span> to{" "}
+                        <span className="text-white">{interpretation.recipientName ?? "an address you typed"}</span>{" "}
+                        <span className="font-mono text-zinc-400">({shortAddress(interpretation.intent.recipient)})</span>
+                        {interpretation.intent.memo ? ` for "${interpretation.intent.memo}"` : ""}.
+                      </p>
+                    )}
                     <p className="mt-1 text-zinc-500">
                       Checked by AgentShield: valid address from your address book or your own text, valid amount.
                       The vault still decides. ({interpretation.latencyMs} ms)
@@ -508,7 +702,9 @@ export default function AgentConsolePage() {
                       disabled={!canPreview}
                       onClick={applyInterpretation}
                     >
-                      Check this request with the vault
+                      {interpretation.payments.length > 1
+                        ? `Check all ${interpretation.payments.length} with the vault`
+                        : "Check this request with the vault"}
                     </button>
                   </div>
                 )}
@@ -527,6 +723,16 @@ export default function AgentConsolePage() {
                   </div>
                 )}
               </div>
+
+              {batch && (
+                <BatchCard
+                  busy={busy}
+                  isSending={isSendingBatch}
+                  items={batch}
+                  onDiscard={discardBatch}
+                  onSend={() => void sendBatch()}
+                />
+              )}
 
               <p className="mt-6 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Or fill it in yourself</p>
               <label className="mt-3 block">
@@ -666,17 +872,17 @@ export default function AgentConsolePage() {
           </section>
         )}
 
-        {attempts.length > 0 && (
+        {history.length > 0 && (
           <section className="pb-10">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">This session</p>
-            <h2 className="mt-2 text-2xl font-semibold text-white">Attempts</h2>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Agent #{agentId?.toString()}</p>
+            <h2 className="mt-2 text-2xl font-semibold text-white">History</h2>
             <p className="mt-1 text-xs text-zinc-500">
-              Kept in this page only. Successful payments are also recorded onchain as PaymentExecuted events;
-              refused requests leave no onchain record.
+              Saved in this browser. Paid and blocked entries are onchain: open the receipt to verify one against
+              the chain or share it. Requests refused before sending leave no onchain record.
             </p>
             <ul className="mt-4 space-y-3">
-              {attempts.map((attempt, index) => (
-                <AttemptRow attempt={attempt} key={`${attempts.length - index}-${attempt.requestId}`} />
+              {history.map((record) => (
+                <AttemptRow key={`${record.at}-${record.requestId}`} record={record} />
               ))}
             </ul>
           </section>
@@ -690,36 +896,55 @@ export default function AgentConsolePage() {
   );
 }
 
-function AttemptRow({ attempt }: { attempt: Attempt }) {
+function AttemptRow({ record }: { record: HistoryRecord }) {
+  const { envelope } = record;
+  const amountWei = BigInt(envelope.amountWei);
+  const source: Source | undefined = envelope.source && {
+    providerLabel: envelope.source.provider,
+    model: envelope.source.model,
+    prompt: envelope.source.prompt,
+    memo: envelope.source.memo,
+    recipientName: envelope.source.recipientName,
+    part: envelope.source.part,
+  };
   const badge = {
     paid: { text: "Paid", style: "bg-lime-300/15 text-lime-200" },
     "reverted-onchain": { text: "Blocked onchain", style: "bg-rose-300/15 text-rose-200" },
     "refused-not-sent": { text: "Refused, not sent", style: "bg-amber-300/15 text-amber-200" },
     failed: { text: "Not completed", style: "bg-white/10 text-zinc-300" },
-  }[attempt.outcome];
+  }[record.outcome];
 
   return (
     <li className="rounded-2xl border border-white/10 bg-[#101419] p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="font-mono text-sm text-white">
-          {formatEther(attempt.amountWei)} MON → {shortAddress(attempt.recipient)}
+          {formatEther(amountWei)} MON → {source?.recipientName ?? shortAddress(envelope.recipient)}
         </p>
         <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${badge.style}`}>{badge.text}</span>
       </div>
-      <p className="mt-2 text-xs leading-5 text-zinc-400">{attempt.note}</p>
-      {attempt.source && <SourceLine source={attempt.source} />}
+      <p className="mt-2 text-xs leading-5 text-zinc-400">{record.note}</p>
+      {source && <SourceLine source={source} />}
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] text-zinc-500">
-        <span>request {shortAddress(attempt.requestId)}</span>
-        {attempt.policyVersion !== undefined && <span>policy v{attempt.policyVersion.toString()}</span>}
-        {attempt.dayIndex !== undefined && <span>UTC day {utcDate(attempt.dayIndex)}</span>}
-        {attempt.hash && (
-          <a
+        <span>{new Date(record.at).toLocaleString()}</span>
+        <span>request {shortAddress(record.requestId)}</span>
+        {record.policyVersion !== undefined && <span>policy v{record.policyVersion}</span>}
+        {record.dayIndex !== undefined && <span>UTC day {utcDate(BigInt(record.dayIndex))}</span>}
+        {record.hash && (
+          <Link
             className="text-lime-200 underline underline-offset-4"
-            href={`${MONAD_TESTNET_EXPLORER_URL}/tx/${attempt.hash}`}
+            href={`/receipt/${record.hash}#e=${encodeEnvelope(envelope)}`}
+          >
+            receipt →
+          </Link>
+        )}
+        {record.hash && (
+          <a
+            className="text-zinc-400 underline underline-offset-4"
+            href={`${MONAD_TESTNET_EXPLORER_URL}/tx/${record.hash}`}
             rel="noreferrer"
             target="_blank"
           >
-            tx {shortAddress(attempt.hash)} ↗
+            tx {shortAddress(record.hash)} ↗
           </a>
         )}
       </div>
@@ -767,6 +992,7 @@ function SourceLine({ source }: { source: Source }) {
     <p className="mt-2 text-[11px] leading-4 text-zinc-500">
       Requested in plain language via {source.providerLabel} ({source.model}, declared): &ldquo;{source.prompt}&rdquo;
       {source.memo ? ` · memo: ${source.memo}` : ""}
+      {source.part ? ` · payment ${source.part}` : ""}
     </p>
   );
 }
@@ -787,4 +1013,83 @@ function Notice({ tone, children }: { tone: "info" | "warning" | "error"; childr
     error: "border-rose-300/20 bg-rose-300/10 text-rose-100",
   }[tone];
   return <div className={`mt-5 rounded-2xl border p-4 text-sm leading-6 ${styles}`}>{children}</div>;
+}
+
+function BatchCard({
+  items,
+  busy,
+  isSending,
+  onSend,
+  onDiscard,
+}: {
+  items: BatchItem[];
+  busy: boolean;
+  isSending: boolean;
+  onSend: () => void;
+  onDiscard: () => void;
+}) {
+  const sendable = items.filter((item) => item.state === "ready");
+  const finished = items.every((item) => item.state !== "ready" && item.state !== "sending");
+  const started = items.some((item) => ["sending", "paid", "blocked", "failed", "skipped"].includes(item.state));
+  const label: Record<BatchState, { text: string; style: string }> = {
+    ready: { text: "Vault would allow", style: "bg-lime-300/15 text-lime-200" },
+    refused: { text: "Vault would refuse", style: "bg-rose-300/15 text-rose-200" },
+    sending: { text: "Confirm in MetaMask…", style: "bg-cyan-300/15 text-cyan-100" },
+    paid: { text: "Paid", style: "bg-lime-300/15 text-lime-200" },
+    blocked: { text: "Blocked onchain", style: "bg-rose-300/15 text-rose-200" },
+    failed: { text: "Not completed", style: "bg-white/10 text-zinc-300" },
+    skipped: { text: "Not sent (stopped)", style: "bg-white/10 text-zinc-400" },
+  };
+  return (
+    <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-4">
+      <p className="text-sm font-semibold text-white">
+        {items.length} payments from one request
+      </p>
+      <p className="mt-1 text-xs leading-5 text-zinc-400">
+        Each payment is its own transaction, checked by the vault on its own. MetaMask asks once per payment.
+        If one fails, the rest are not sent.
+      </p>
+      <ol className="mt-3 space-y-2">
+        {items.map((item, index) => (
+          <li className="rounded-xl border border-white/10 bg-[#0c1014] p-3 text-xs" key={item.requestId}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-mono text-white">
+                {index + 1}. {formatEther(item.amountWei)} MON → {item.source?.recipientName ?? shortAddress(item.recipient)}
+                {item.source?.memo ? <span className="font-sans text-zinc-400"> · {item.source.memo}</span> : null}
+              </span>
+              <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${label[item.state].style}`}>
+                {label[item.state].text}
+              </span>
+            </div>
+            {item.reason && item.state === "refused" && <p className="mt-1 text-rose-100/80">{item.reason}</p>}
+          </li>
+        ))}
+      </ol>
+      {!finished || !started ? (
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          <button
+            className="rounded-xl border border-white/15 bg-white/[0.06] px-4 py-3 text-sm font-semibold text-white hover:bg-white/10 disabled:opacity-40"
+            disabled={busy}
+            onClick={onDiscard}
+          >
+            Don&apos;t send
+          </button>
+          <button
+            className="rounded-xl bg-lime-300 px-4 py-3 text-sm font-bold text-zinc-950 hover:bg-lime-200 disabled:opacity-40"
+            disabled={busy || sendable.length === 0}
+            onClick={onSend}
+          >
+            {isSending ? "Sending…" : `Send ${sendable.length} allowed payment${sendable.length === 1 ? "" : "s"}`}
+          </button>
+        </div>
+      ) : (
+        <button
+          className="mt-4 w-full rounded-xl border border-white/15 bg-white/[0.06] px-4 py-3 text-sm font-semibold text-white hover:bg-white/10"
+          onClick={onDiscard}
+        >
+          Done
+        </button>
+      )}
+    </div>
+  );
 }

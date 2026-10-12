@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { getAddress, parseEther } from "viem";
-import { buildSystemPrompt, parseModelJson, resolveIntent, sanitizeAddressBook } from "../src/lib/ai/intent";
+import { buildSystemPrompt, parseModelJson, resolveIntent, resolveIntents, sanitizeAddressBook } from "../src/lib/ai/intent";
 
 const shop = getAddress("0x1240e3e019384c673a1b6cfba61823b6619c98df");
 const cafe = getAddress("0x0000000000000000000000000000000000000c4f");
@@ -83,5 +83,63 @@ describe("sanitizeAddressBook and prompt", function () {
     const prompt = buildSystemPrompt(book.map((entry) => entry.name));
     assert.ok(prompt.includes("- Shop"));
     assert.ok(!prompt.toLowerCase().includes(shop.toLowerCase()));
+  });
+});
+
+describe("resolveIntents (several payments in one sentence)", function () {
+  it("resolves a list of payments in order", function () {
+    const result = resolveIntents(
+      {
+        action: "pay",
+        payments: [
+          { recipient: "Shop", amountMon: "0.02", memo: "milk" },
+          { recipient: "cafe", amountMon: 0.03, memo: "bread" },
+        ],
+      },
+      book,
+      "pay Shop 0.02 for milk and Cafe 0.03 for bread",
+    );
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(
+      result.payments.map((payment) => [payment.intent.recipient, payment.intent.amountWei, payment.recipientName]),
+      [
+        [shop, parseEther("0.02").toString(), "Shop"],
+        [cafe, parseEther("0.03").toString(), "Cafe"],
+      ],
+    );
+  });
+
+  it("still accepts the single-payment shape", function () {
+    const result = resolveIntents({ action: "pay", recipient: "Shop", amountMon: "0.05" }, book, "pay shop 0.05");
+    assert.equal(result.ok && result.payments.length, 1);
+  });
+
+  it("rejects the whole request if any one payment is invalid", function () {
+    const result = resolveIntents(
+      {
+        action: "pay",
+        payments: [
+          { recipient: "Shop", amountMon: "0.02" },
+          { recipient: stranger, amountMon: "0.02" },
+        ],
+      },
+      book,
+      "pay Shop 0.02 and someone else 0.02",
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.ok ? "" : result.code, "invented_address");
+    assert.match(result.ok ? "" : result.message, /Payment 2 of 2/);
+  });
+
+  it("caps the number of payments per request", function () {
+    const payments = Array.from({ length: 6 }, () => ({ recipient: "Shop", amountMon: "0.01" }));
+    const result = resolveIntents({ action: "pay", payments }, book, "pay shop six times");
+    assert.equal(result.ok, false);
+  });
+
+  it("passes a model refusal through", function () {
+    const result = resolveIntents({ action: "none", reason: "No amount given." }, book, "pay shop");
+    assert.equal(result.ok ? "" : result.code, "model_declined");
   });
 });
