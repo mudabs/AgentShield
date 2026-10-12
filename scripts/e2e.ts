@@ -50,8 +50,10 @@ const RPC_URL = process.env.E2E_RPC_URL || process.env.MONAD_TESTNET_RPC_URL || 
 const APP_URL = (process.env.E2E_APP_URL || "http://localhost:3000").replace(/\/$/, "");
 const DEPLOY = process.env.E2E_DEPLOY === "1";
 const SKIP_AI = process.env.E2E_SKIP_AI === "1";
-const ownerKey = process.env.PRIVATE_KEY as Hex | undefined;
-if (!ownerKey || !/^0x[0-9a-fA-F]{64}$/.test(ownerKey)) throw new Error("PRIVATE_KEY in .env must be 0x + 64 hex characters.");
+// MetaMask exports keys without the 0x prefix; accept both.
+const rawOwnerKey = (process.env.PRIVATE_KEY ?? "").trim().replace(/^"|"$/g, "");
+const ownerKey = (rawOwnerKey.startsWith("0x") ? rawOwnerKey : `0x${rawOwnerKey}`) as Hex;
+if (!/^0x[0-9a-fA-F]{64}$/.test(ownerKey)) throw new Error("PRIVATE_KEY in .env must be 64 hex characters (with or without 0x).");
 
 const PER_PAYMENT = parseEther("0.02");
 const DAILY = parseEther("0.05");

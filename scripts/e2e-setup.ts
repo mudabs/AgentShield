@@ -23,8 +23,10 @@ const TARGET_AGENT_GAS = parseEther("0.3");
 const TOP_UP_BELOW = parseEther("0.15");
 const SWEEP_SHOP_ABOVE = parseEther("0.05");
 
-const ownerKey = process.env.PRIVATE_KEY as Hex | undefined;
-if (!ownerKey || !/^0x[0-9a-fA-F]{64}$/.test(ownerKey)) throw new Error("PRIVATE_KEY in .env must be 0x + 64 hex characters.");
+// MetaMask exports keys without the 0x prefix; accept both.
+const rawOwnerKey = (process.env.PRIVATE_KEY ?? "").trim().replace(/^"|"$/g, "");
+const ownerKey = (rawOwnerKey.startsWith("0x") ? rawOwnerKey : `0x${rawOwnerKey}`) as Hex;
+if (!/^0x[0-9a-fA-F]{64}$/.test(ownerKey)) throw new Error("PRIVATE_KEY in .env must be 64 hex characters (with or without 0x).");
 
 function ensureKey(name: string): Hex {
   const existing = process.env[name];

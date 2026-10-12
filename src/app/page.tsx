@@ -79,6 +79,12 @@ export default function Home() {
               Set up an agent
             </Link>
             <Link
+              className="rounded-xl border border-rose-300/40 bg-rose-300/10 px-5 py-3 text-sm font-semibold text-rose-100 hover:bg-rose-300/20"
+              href="/arena"
+            >
+              Try to rob our agent, no wallet needed
+            </Link>
+            <Link
               className="rounded-xl border border-white/15 bg-white/[0.06] px-5 py-3 text-sm font-semibold text-white hover:bg-white/10"
               href="/pay"
             >
