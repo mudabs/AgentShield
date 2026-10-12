@@ -18,6 +18,14 @@ const contractErrorMessages: Record<string, string> = {
   PerPaymentLimitExceeded: "The amount is above this agent's per-payment limit.",
   RecipientNotApproved: "The recipient is not on this agent's approved list.",
   UnauthorizedSigner: "This account is not the agent's signer, or the agent is inactive.",
+  MandateNotYetValid: "The mandate is not valid yet.",
+  MandateExpired: "The mandate has expired.",
+  MandateRevoked: "The owner revoked this mandate.",
+  MandateBudgetExceeded: "This would go over the mandate's total budget.",
+  MandatePerPaymentExceeded: "The amount is above the mandate's per-payment cap.",
+  NotMandateAgent: "Only the agent key named in the mandate can use it.",
+  NotSignedByOwner: "The mandate was not signed by the agent's owner, or it was changed after signing.",
+  AgentNotWiredToExecutor: "This agent is not set up to pay through mandates.",
 };
 
 /** Turns wallet, RPC, and contract errors into one sentence a person can act on. */

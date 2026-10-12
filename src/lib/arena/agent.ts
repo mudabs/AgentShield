@@ -36,7 +36,11 @@ export type ArenaEvent =
   | { type: "sent"; index: number; hash: Hash }
   | { type: "confirmed"; index: number; paid: boolean; hash: Hash; receiptPath: string }
   | { type: "done"; outcome: ArenaOutcome; headline: string }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | { type: "x402-request"; url: string; attempt: number }
+  | { type: "x402-402"; attempt: number; amountMon: string; payTo: Address; payToName?: string; description: string }
+  | { type: "x402-response"; attempt: number; status: number; message?: string }
+  | { type: "x402-data"; data: unknown };
 
 const RPC_URL = process.env.MONAD_TESTNET_RPC_URL || monadTestnet.rpcUrls.default.http[0];
 
@@ -64,15 +68,22 @@ function getClients(account: ReturnType<typeof privateKeyToAccount>) {
   return clients;
 }
 
+/** Clients signing as the server-held demo agent key (shared with the mandates demo). */
+export function demoAgentClients() {
+  const config = arenaConfig();
+  if (!config) return undefined;
+  return { account: config.account, ...getClients(config.account) };
+}
+
 // One payment at a time from this process, so two visitors never race for the same nonce.
 let sendQueue: Promise<unknown> = Promise.resolve();
-function serialized<T>(task: () => Promise<T>): Promise<T> {
+export function serialized<T>(task: () => Promise<T>): Promise<T> {
   const run = sendQueue.then(task, task);
   sendQueue = run.catch(() => undefined);
   return run;
 }
 
-function errorName(error: unknown): string | undefined {
+export function errorName(error: unknown): string | undefined {
   if (!(error instanceof BaseError)) return undefined;
   const reverted = error.walk((cause) => cause instanceof ContractFunctionRevertedError);
   return reverted instanceof ContractFunctionRevertedError ? reverted.data?.errorName : undefined;
@@ -294,4 +305,45 @@ export async function runAttack(
       // The scoreboard is best effort; the attack result above is what matters.
     }
   }
+}
+
+
+/**
+ * Pays from the demo agent's vault with a caller-chosen request ID (used by the x402
+ * flow, where the request ID is the hash of the server's payment challenge).
+ * Previews first; only sends when the vault would allow it.
+ */
+export async function vaultPayAsDemoAgent(
+  input: { recipient: Address; amountWei: bigint; requestId: `0x${string}`; index: number },
+  emit: (event: ArenaEvent) => void,
+): Promise<{ allowed: false; reason: string; name?: string } | { allowed: true; paid: boolean; hash: Hash }> {
+  const config = arenaConfig();
+  if (!config) throw new Error("The demo agent is not configured on this server.");
+  const { publicClient, walletClient } = getClients(config.account);
+  const args = [config.agentId, input.requestId, getAddress(input.recipient), input.amountWei] as const;
+  return serialized(async () => {
+    try {
+      await publicClient.simulateContract({ account: config.account, address: vaultAddress!, abi: vaultAbi, functionName: "executePayment", args });
+    } catch (error) {
+      const result = { allowed: false as const, reason: describeError(error as Error), name: errorName(error) };
+      emit({ type: "vault-check", index: input.index, allowed: false, reason: result.reason, errorName: result.name });
+      return result;
+    }
+    emit({ type: "vault-check", index: input.index, allowed: true });
+    const gas = await publicClient.estimateContractGas({ account: config.account, address: vaultAddress!, abi: vaultAbi, functionName: "executePayment", args });
+    const hash = await walletClient.writeContract({
+      account: config.account,
+      chain: monadTestnet,
+      address: vaultAddress!,
+      abi: vaultAbi,
+      functionName: "executePayment",
+      args,
+      gas: (gas * BigInt(125)) / BigInt(100),
+    });
+    emit({ type: "sent", index: input.index, hash });
+    const receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: 45_000 });
+    const paid = receipt.status === "success" && parseEventLogs({ abi: vaultAbi, eventName: "PaymentExecuted", logs: receipt.logs }).length > 0;
+    emit({ type: "confirmed", index: input.index, paid, hash, receiptPath: `/receipt/${hash}` });
+    return { allowed: true as const, paid, hash };
+  });
 }

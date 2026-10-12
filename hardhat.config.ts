@@ -2,7 +2,9 @@ import hardhatToolboxViemPlugin from "@nomicfoundation/hardhat-toolbox-viem";
 import { defineConfig } from "hardhat/config";
 import "dotenv/config";
 
-const privateKey = process.env.PRIVATE_KEY ?? "";
+// MetaMask exports keys without 0x; Hardhat needs the prefix.
+const rawKey = (process.env.PRIVATE_KEY ?? "").trim();
+const privateKey = rawKey && !rawKey.startsWith("0x") ? `0x${rawKey}` : rawKey;
 
 export default defineConfig({
   plugins: [hardhatToolboxViemPlugin],

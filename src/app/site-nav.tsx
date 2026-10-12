@@ -7,6 +7,7 @@ const links = [
   { href: "/agent", label: "Owner setup" },
   { href: "/pay", label: "Agent console" },
   { href: "/book", label: "Address book" },
+  { href: "/mandates", label: "Mandates" },
   { href: "/arena", label: "Break the agent" },
 ];
 

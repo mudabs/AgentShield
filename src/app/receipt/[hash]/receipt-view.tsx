@@ -129,6 +129,12 @@ export function ReceiptView() {
         })
       : undefined;
 
+  const [envelopeParam, setEnvelopeParam] = useState("");
+  useEffect(() => {
+    const fragment = new URLSearchParams(window.location.hash.slice(1)).get("e");
+    setEnvelopeParam(fragment ? `&e=${fragment}` : "");
+  }, []);
+
   const copyLink = async () => {
     try {
       await navigator.clipboard.writeText(window.location.href);
@@ -207,6 +213,14 @@ export function ReceiptView() {
                 target="_blank"
               >
                 Open in the Monad explorer ↗
+              </a>
+              <a
+                className="ml-4 mt-4 inline-block text-xs text-zinc-400 underline underline-offset-4"
+                href={`/api/verify?tx=${hash}${envelopeParam}`}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Machine-readable proof (JSON) ↗
               </a>
             </Card>
 

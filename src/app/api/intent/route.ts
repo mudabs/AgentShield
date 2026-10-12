@@ -6,6 +6,7 @@ import {
   sanitizeAddressBook,
 } from "@/lib/ai/intent";
 import { complete, isProviderId, listProviders, ProviderError } from "@/lib/ai/providers";
+import { takeDailyBudget } from "@/lib/arena/store";
 
 /**
  * POST /api/intent
@@ -21,6 +22,8 @@ import { complete, isProviderId, listProviders, ProviderError } from "@/lib/ai/p
 const WINDOW_MS = 60_000;
 const MAX_CALLS_PER_WINDOW = Number(process.env.INTENT_RATE_LIMIT_PER_MINUTE) || 20;
 const recentCalls = new Map<string, number[]>();
+// Global cap on model calls per UTC day, so a public deployment cannot run up the AI bill.
+const DAILY_MODEL_CALLS = Number(process.env.INTENT_DAILY_LIMIT) || 500;
 
 function rateLimited(caller: string): boolean {
   const now = Date.now();
@@ -62,6 +65,10 @@ export async function POST(request: Request) {
   }
   const addressBook = sanitizeAddressBook(rawBook);
   if (typeof addressBook === "string") return fail(400, addressBook);
+
+  if (!(await takeDailyBudget(DAILY_MODEL_CALLS, "intent").catch(() => true))) {
+    return fail(429, "Today's AI budget for this demo is used up. It resets at 00:00 UTC.");
+  }
 
   const system = buildSystemPrompt(addressBook.map((entry) => entry.name));
   const startedAt = Date.now();

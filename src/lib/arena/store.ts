@@ -39,8 +39,9 @@ const memory = {
 };
 
 function redisConfig() {
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  // Vercel's Upstash integration names these KV_REST_API_*; a direct Upstash setup uses UPSTASH_REDIS_REST_*.
+  const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
   return url && token ? { url: url.replace(/\/$/, ""), token } : undefined;
 }
 
@@ -79,8 +80,12 @@ export async function recordAttempt(entry: FeedEntry, paidWei: bigint, unapprove
     // Wei totals stay well inside Redis's 64-bit integers for test amounts.
     if (paidWei > BigInt(0)) commands.push(["HINCRBY", "arena:stats", "paidWei", paidWei.toString()]);
     if (unapprovedWei > BigInt(0)) commands.push(["HINCRBY", "arena:stats", "unapprovedWei", unapprovedWei.toString()]);
-    await pipeline(commands);
-    return;
+    try {
+      await pipeline(commands);
+      return;
+    } catch {
+      // Fall through and keep the count in memory.
+    }
   }
   memory.stats.attempts += 1;
   if (field) (memory.stats[field] as number) += 1;
@@ -91,6 +96,11 @@ export async function recordAttempt(entry: FeedEntry, paidWei: bigint, unapprove
 
 export async function readScoreboard(): Promise<{ stats: ArenaStats; feed: FeedEntry[] }> {
   if (!redisConfig()) return { stats: { ...memory.stats }, feed: [...memory.feed] };
+  // If the shared store is unavailable (or its free quota is used up), show this server's own counts instead of an error.
+  return readSharedScoreboard().catch(() => ({ stats: { ...memory.stats }, feed: [...memory.feed] }));
+}
+
+async function readSharedScoreboard(): Promise<{ stats: ArenaStats; feed: FeedEntry[] }> {
   const [hash, list] = await pipeline([
     ["HGETALL", "arena:stats"],
     ["LRANGE", "arena:feed", 0, FEED_LENGTH - 1],
@@ -121,17 +131,18 @@ export async function readScoreboard(): Promise<{ stats: ArenaStats; feed: FeedE
 }
 
 /** Counts one model call against today's global budget. Returns false once the budget is spent. */
-export async function takeDailyBudget(limit: number): Promise<boolean> {
+export async function takeDailyBudget(limit: number, name = "arena"): Promise<boolean> {
   const day = new Date().toISOString().slice(0, 10);
+  const key = `${name}:budget:${day}`;
   if (redisConfig()) {
     const [count] = await pipeline([
-      ["INCR", `arena:budget:${day}`],
-      ["EXPIRE", `arena:budget:${day}`, 172_800],
+      ["INCR", key],
+      ["EXPIRE", key, 172_800],
     ]);
     return Number(count) <= limit;
   }
-  const next = (memory.daily.get(day) ?? 0) + 1;
-  memory.daily.clear();
-  memory.daily.set(day, next);
+  for (const existing of memory.daily.keys()) if (!existing.endsWith(day)) memory.daily.delete(existing);
+  const next = (memory.daily.get(key) ?? 0) + 1;
+  memory.daily.set(key, next);
   return next <= limit;
 }
