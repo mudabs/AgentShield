@@ -48,3 +48,6 @@ next-env.d.ts
 #brag
 brag-output
 videos
+brag-output/
+videos/
+.vscode/
