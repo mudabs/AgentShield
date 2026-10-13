@@ -1,174 +1,165 @@
 # AgentShield
 
-AgentShield is a trust and security layer for autonomous AI agents making payments on Monad. The product goal is:
+**Give your AI agent a wallet, not a blank cheque.**
 
-**Create agent → set policy → fund guarded vault → request payment → enforce policy → execute or reject → verify receipt → inspect history.**
+AgentShield is a trust layer for AI agents that spend money. A vault contract on Monad holds the agent's funds and enforces the owner's rules on every payment: approved recipients, per-payment and daily limits, a pause switch, replay protection, and optional owner-signed mandates. The AI can propose a payment. Only the contract decides whether it happens.
 
-The repository currently contains the foundation slice plus locally tested enforcement contracts. The browser still uses the tiny probe until the registry/vault are deployed and wired into the payment UI. The probe is deliberately not a payment vault.
+**Live:** https://agentshield.munashemudabura.com (Monad Testnet)
+**Try it with no wallet:** https://agentshield.munashemudabura.com/arena
 
-## Current architecture
+Built for the Monad Metropolis hackathon, track: Trust, Identity & AI Infrastructure.
+
+---
+
+## Why this exists
+
+AI agents are starting to pay for things on their own, and the tooling around them has known holes:
+
+- **x402 agents pay whoever asks.** The x402 flow lets an API answer "402 Payment Required: pay X to Y" and the agent pays automatically. A security write-up lists what is missing: no recipient allowlist ("agents blindly pay whoever responds with a 402 header"), no per-endpoint limits, no protection against retry loops paying twice, no check that the amount matches, and no policy audit trail ([PolicyLayer](https://policylayer.com/blog/securing-x402-protocol-agent-spending-controls)).
+- **Excessive agency** is a top-10 risk for LLM applications in the OWASP list: giving a model more authority than the task needs ([Giskard summary](https://www.giskard.ai/glossary/owasp-llm06-2025-excessive-agency-oprdx)).
+- **Mandates exist on paper for cards, not for crypto.** Google's AP2 proposes signed "intent mandates" so a purchase can be proven authorized; its first version covers card payments, with digital currencies on the roadmap ([Vellum overview](https://www.vellum.ai/blog/googles-ap2-a-new-protocol-for-ai-agent-payments)).
+
+AgentShield answers each of these with code that runs on Monad today.
+
+## What you can try on the live site
+
+| Page | What it shows | Wallet needed? |
+|---|---|---|
+| [`/arena`](https://agentshield.munashemudabura.com/arena) **Break the Agent** | A demo agent that pays on its own (its key is held by the server). Switch on *compromised mode* and the AI obeys anything with app-side checks off; only the vault is left. Try "drain the vault" and watch it fail onchain. Live scoreboard. | No |
+| `/arena` **x402 Guard** | The same agent buys data from paid APIs: an honest one, one that overcharges 250x, one that swaps the pay-to address, one that keeps asking to be paid again. The vault stops the last three. | No |
+| [`/mandates`](https://agentshield.munashemudabura.com/mandates) | The owner signs a free EIP-712 mandate ("0.03 MON to Shop for coffee, 24 hours"); the agent spends under it; forged, edited, overspent or revoked mandates are refused by the contract. | Owner only, to sign |
+| [`/agent`](https://agentshield.munashemudabura.com/agent) Owner setup | Register an agent, set limits, approve recipients, deposit, withdraw, pause, rotate the agent key, retire the agent. | Yes |
+| [`/pay`](https://agentshield.munashemudabura.com/pay) Agent console | Ask in plain language (OpenAI or Kimi), one or several payments per sentence, preview against the vault, send, keep a history. | Yes (agent account) |
+| `/receipt/<tx>` | A public receipt read straight from Monad, with the request details verified against the onchain commitment. | No |
+| [`/api/verify?tx=`](https://agentshield.munashemudabura.com/api/verify?tx=0x74c7bd3535ba8c29f1a76233456bfa409fdce39e28e1e823d5b32cee8a2dd251) | Machine-readable proof for merchants that a payment came from a rule-bound agent. | No |
+
+## How it works
 
 ```text
-Browser
-  └─ Next.js client page
-      ├─ wagmi + viem → injected wallet signer
-      ├─ viem public transport → Monad Testnet RPC
-      └─ AgentShieldProbe → marker read/write + confirmed receipt
-
-Enforcement contracts (locally tested, not yet deployed):
-  AgentRegistry → AgentGuardVault → policy checks → PaymentExecuted receipt
-
-Next app slice:
-  agent setup → policy editor → vault deposit → payment request → receipt/history
+"Pay Shop 0.02 for milk and Store 0.03 for bread"
+        │
+        ▼
+  AI model (OpenAI / Kimi)  ── sees contact NAMES only, never addresses or keys
+        │  JSON proposal
+        ▼
+  AgentShield checks        ── known names or addresses the user typed; strict amounts; max 5 payments
+        │  request ID = keccak256(recipient, amount, prompt, model, salt)
+        ▼
+  AgentGuardVault (Monad)   ── signer? approved recipient? per-payment cap? daily cap? paused? balance? replay?
+        │
+        ├─ pays and emits PaymentExecuted ──► public receipt + /api/verify
+        └─ reverts, nothing moves
 ```
 
-The wallet signs transactions, but it does not hold or enforce the guarded balance. `AgentGuardVault` is the authority for payment policy. AI will eventually parse and explain requests; it will not receive keys or bypass contract checks.
+Optional layers on top of the same vault:
 
-`AgentGuardVault` uses UTC calendar-day buckets (`block.timestamp / 1 days`), an owner-configured per-payment limit, a daily limit, an explicit recipient allowlist, an owner pause, and a request ID per payment. State is updated before the external native-MON transfer and protected by a reentrancy guard. Direct native-MON transfers without an agent context revert. Successful payments emit enough data to reconstruct the action and policy version; reverted calls do not retain events.
+- **MandateExecutor**: an agent whose registry signer is this contract can only pay under an owner-signed mandate (one recipient, total budget, per-payment cap, time window, purpose hash). The vault policy still applies on top.
+- **x402 Guard**: the vault request ID is the hash of the API's signed 402 challenge, so each challenge can be paid at most once and the server can check the payment answers exactly its challenge.
 
-## Requirements
+## Deployed contracts (Monad Testnet, chain 10143)
 
-- Node.js 22.13+ (the local environment currently uses Node 24.13.1)
-- npm
-- An EVM wallet such as MetaMask for browser interaction
-- Optional Monad Testnet MON from the [official faucet](https://faucet.monad.xyz) for testnet deployment and gas
+| Contract | Address |
+|---|---|
+| AgentRegistry | [`0x7a9131100dd823af635f68f1223a0cadfdf5d71a`](https://testnet.monadvision.com/address/0x7a9131100dd823af635f68f1223a0cadfdf5d71a) |
+| AgentGuardVault | [`0xbdbb2b644d79ac3f5a5282e52050e9b5e563a202`](https://testnet.monadvision.com/address/0xbdbb2b644d79ac3f5a5282e52050e9b5e563a202) |
+| MandateExecutor | [`0x55285f1f98be674a64c51dc53316b62604d023f4`](https://testnet.monadvision.com/address/0x55285f1f98be674a64c51dc53316b62604d023f4) |
 
-## Run the app
+Demo agents: #9 (the public Break the Agent agent: 0.01 MON per payment, 0.05 per day, Shop and Store only) and #10 (mandate-only agent).
+
+## Security model
+
+**Enforced by contracts, whatever the AI or the web app does:**
+- The agent key can only call `executePayment`. It cannot withdraw, change limits, approve recipients or unpause.
+- Payments go only to owner-approved recipients, within per-payment and per-UTC-day limits, from the agent's own vault balance.
+- Every request ID can be used once.
+- The owner can pause, rotate the agent key, or deactivate the agent in one transaction.
+- Mandate agents additionally need a valid owner signature, inside its window, within its budget and per-payment cap, not revoked.
+
+**Checked by the app, as defence in depth (and switched off in the arena's compromised mode to prove the point):** the model only sees contact names; it may not invent an address; amounts are parsed strictly; a multi-payment request is all or nothing.
+
+**Commitments, not attestations:** a receipt proves the prompt, model name, recipient and amount were fixed when the payment was signed. The model name is declared by our server, not signed by the model provider.
+
+**Keys:** the owner key never leaves the owner's wallet or local `.env`. The public demo agent's testnet key lives in server environment variables; by design its worst case is bounded by the vault policy (0.05 MON a day to our own addresses) plus its small gas wallet. AI provider keys are server-only, with per-caller rate limits and daily caps.
+
+## Use it from your own agent
+
+**Any AI app, through MCP.** [`mcp/server.mjs`](mcp/README.md) gives Cursor, VS Code agents, Claude Desktop and other MCP clients four tools: `agentshield_status`, `agentshield_preview_payment`, `agentshield_pay` and `agentshield_fetch_paid_url` (pays x402-style APIs through the vault). No dependencies beyond viem. See [mcp/README.md](mcp/README.md).
+
+**Any code, directly.** The vault does not care what software calls it:
+
+```ts
+import { createWalletClient, http, keccak256, parseEther, toHex } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+
+const agent = createWalletClient({ account: privateKeyToAccount(AGENT_KEY), chain: monadTestnet, transport: http() });
+await agent.writeContract({
+  address: VAULT, abi: vaultAbi, functionName: "executePayment",
+  args: [AGENT_ID, keccak256(toHex(crypto.getRandomValues(new Uint8Array(32)))), SHOP, parseEther("0.01")],
+});
+// Reverts with RecipientNotApproved, PerPaymentLimitExceeded, DailyLimitExceeded, AgentPaused, ... if the policy says no.
+```
+
+**Merchants:** `GET /api/verify?tx=0x…` returns the agent, its owner, the policy version that applied and a plain-language explanation. CORS is open.
+
+## Run it locally
+
+Requirements: Node.js 22, npm, MetaMask with Monad Testnet, test MON from [faucet.monad.xyz](https://faucet.monad.xyz).
 
 ```bash
 npm install
-npm run dev
+cp .env.example .env      # then fill in the values (see below)
+npm run dev               # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+| Script | What it does |
+|---|---|
+| `npm run contracts:test` | Contract and unit tests (49) |
+| `npm run contracts:deploy:guarded:testnet` | Deploy AgentRegistry and AgentGuardVault |
+| `npm run demo:setup` | Create the server-held demo agent: key, registration, limits, approvals, deposit, gas |
+| `npm run mandates:setup` | Deploy MandateExecutor and a mandate-only agent |
+| `npm run e2e` | End-to-end checks against the live testnet (42 checks) |
+| `npm run mcp:smoke` | Start the MCP server with the demo agent and call its tools |
 
-## Deploy to Vercel with continuous deployment
+### Environment variables
 
-The repository includes [`vercel.json`](vercel.json) for a reproducible Next.js
-build and [GitHub CI](.github/workflows/ci.yml) for linting, typechecking,
-contract tests, and the production build.
+| Scope | Variables |
+|---|---|
+| Public (browser) | `NEXT_PUBLIC_MONAD_RPC_URL`, `NEXT_PUBLIC_REGISTRY_CONTRACT_ADDRESS`, `NEXT_PUBLIC_VAULT_CONTRACT_ADDRESS`, `NEXT_PUBLIC_MANDATE_EXECUTOR_ADDRESS` |
+| Server only | `MONAD_TESTNET_RPC_URL`, `OPENAI_API_KEY` and/or `KIMI_API_KEY`, `DEMO_AGENT_PRIVATE_KEY`, `DEMO_AGENT_ID`, `DEMO_ADDRESS_BOOK`, `MANDATE_AGENT_ID`, Redis (`KV_REST_API_URL` + `KV_REST_API_TOKEN` from Vercel's Upstash integration, or `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`) |
+| Optional | `INTENT_RATE_LIMIT_PER_MINUTE`, `INTENT_DAILY_LIMIT`, `ARENA_RATE_LIMIT_PER_MINUTE`, `ARENA_DAILY_ATTEMPTS`, `X402_SECRET`, `X402_PAY_TO` |
+| Never on a server | `PRIVATE_KEY` (owner), `E2E_AGENT_PRIVATE_KEY`, `E2E_SHOP_PRIVATE_KEY` |
 
-To create the Vercel project, import the GitHub repository
-[`mudabs/AgentShield`](https://github.com/mudabs/AgentShield) from the Vercel
-dashboard. Keep the project root at the repository root, use the Next.js
-framework preset, and set `master` as the Production Branch. Vercel's Git
-integration then provides continuous deployment automatically:
+Keys exported from MetaMask without the `0x` prefix are accepted. Without Redis, scoreboard counts and signed mandates live in memory and reset on restart.
 
-- pushes to non-production branches and pull requests create Preview deployments;
-- pushes and merges to `master` create Production deployments.
+### Deploying
 
-Add the following variables in Vercel Project Settings → Environment Variables.
-Use Preview and Production scopes as appropriate; never commit their values.
+The repo deploys to Vercel as-is ([`vercel.json`](vercel.json)); GitHub CI runs lint, typecheck, contract tests and the production build on every push ([`ci.yml`](.github/workflows/ci.yml)). Add the variables above in Vercel → Settings → Environment Variables, scope secrets to Production, and connect Upstash Redis from the Storage tab (free plan).
 
-Public browser configuration:
+## Repository layout
 
 ```text
-NEXT_PUBLIC_MONAD_RPC_URL
-NEXT_PUBLIC_PROBE_CONTRACT_ADDRESS
-NEXT_PUBLIC_REGISTRY_CONTRACT_ADDRESS
-NEXT_PUBLIC_VAULT_CONTRACT_ADDRESS
+contracts/      AgentRegistry, AgentGuardVault, MandateExecutor (+ test helper)
+src/app/        Pages: home, agent, pay, book, arena, mandates, receipt; API routes under api/
+src/lib/        guard (ABIs/addresses), ai/ (providers, intent validation), receipts, history,
+                arena/ (demo agent, x402 client, scoreboard), x402/, mandates, verify
+mcp/            Dependency-free MCP server
+scripts/        Deploy and setup scripts, e2e, MCP smoke test
+test/           Contract tests (Hardhat + viem) and unit tests (node:test)
+docs/           BUILD_LOG (dated evidence), SUBMISSION
 ```
 
-Server-only configuration:
+## Honest limits
 
-```text
-MONAD_TESTNET_RPC_URL
-KIMI_API_KEY or OPENAI_API_KEY or ANTHROPIC_API_KEY
-DEMO_AGENT_PRIVATE_KEY
-DEMO_AGENT_ID
-DEMO_ADDRESS_BOOK
-UPSTASH_REDIS_REST_URL
-UPSTASH_REDIS_REST_TOKEN
-```
+- Testnet only; test MON has no value.
+- In the agent console a person clicks Send as the agent; the arena and mandates pages show the same rules with a server-held agent key and no human in the loop.
+- x402 here is x402-style: the same 402 request/response shape, settled in native MON through the vault rather than stablecoins through a facilitator.
+- Model names on receipts are declared, not attested.
 
-The rate-limit variables (`INTENT_RATE_LIMIT_PER_MINUTE`,
-`ARENA_RATE_LIMIT_PER_MINUTE`, and `ARENA_DAILY_ATTEMPTS`) are optional. Keep
-`PRIVATE_KEY`, `E2E_AGENT_PRIVATE_KEY`, and `E2E_SHOP_PRIVATE_KEY` out of
-Vercel; they are for local testnet scripts only. The demo agent key is also a
-testnet-only key and should be scoped to Production unless you intentionally
-want Preview deployments to spend testnet MON.
+## Roadmap
 
-After importing the repository, push a branch or open a pull request to verify
-the Preview deployment, then merge to `master` for the first Production
-deployment. Vercel will show the deployment URL and build logs in the GitHub
-check and in the Vercel dashboard.
+- One-wallet onboarding: generate the agent key in the browser so a new user needs only their owner wallet.
+- Stablecoin vaults and a standard x402 facilitator integration.
+- Escalation instead of refusal: payments over a limit wait for owner approval.
+- Agent identity and reputation via [ERC-8004](https://github.com/erc-8004/erc-8004-contracts) registries, with vault outcomes as reputation signals.
 
-## Compile and test the contract
-
-```bash
-npm run contracts:compile
-npm run contracts:test
-```
-
-The enforcement test suite covers allowed payments, reconstructable receipts, wrong signers, unapproved recipients, unauthorized policy changes, pause, per-payment and daily limits, duplicate request IDs, UTC-day rollover, failed recipient transfers, and direct-transfer rejection.
-
-## Enforcement contract layout
-
-- `contracts/AgentRegistry.sol`: owner, authorized signer, active state, and metadata hash.
-- `contracts/AgentGuardVault.sol`: native-MON custody, policy state, allowlist, nonce/request protection, and guarded execution.
-- `contracts/RejectingRecipient.sol`: test-only recipient used to prove failed transfers roll back spending state.
-
-The owner can deposit or withdraw funds administratively. The authorized agent signer has no withdrawal or arbitrary-call route; it can only call `executePayment` with an approved recipient and an amount allowed by the vault policy.
-
-## AI provider boundary
-
-The shared provider boundary now lives in `src/lib/ai/provider.ts`, and `src/lib/ai/payment-intent.ts` converts untrusted model output into one validated native-MON intent. Small network adapters for Kimi, OpenAI, Anthropic, AgentShield-managed inference, and external-agent callers will plug into that interface later. Provider credentials remain server-side and separate from wallet signing keys. A user key will never be placed in a `NEXT_PUBLIC_` variable, browser bundle, log, receipt, or contract call.
-
-“Sign in with ChatGPT” is not treated as generic OpenAI API access, and a Claude.ai subscription is not treated as Anthropic Console API access. These are separate integration and billing surfaces; implementation requires verified partner availability, permissions, tenant controls, and account eligibility.
-
-## Deploy the probe locally
-
-In terminal 1:
-
-```bash
-npm run contracts:node
-```
-
-In terminal 2:
-
-```bash
-npm run contracts:deploy:local
-```
-
-Copy the printed address into `.env.local` as `NEXT_PUBLIC_PROBE_CONTRACT_ADDRESS`. Restart `npm run dev`. The browser app is configured for Monad Testnet, so use the testnet deploy command for the live wallet flow below; the local deploy is for contract preparation and test isolation.
-
-## Deploy the probe to Monad Testnet
-
-1. Copy `.env.example` to `.env`.
-2. Set `PRIVATE_KEY` to a dedicated testnet-only deployer key. Never use a production key or expose it to the browser.
-3. Fund that address with testnet MON from the [official faucet](https://faucet.monad.xyz).
-4. Run:
-
-```bash
-npm run contracts:compile
-npm run contracts:deploy:testnet
-```
-
-To deploy the guarded payment contracts, use the dedicated script below after
-putting a funded testnet-only deployer key in `.env`:
-
-```bash
-npm run contracts:deploy:guarded:testnet
-```
-
-This deploys `AgentRegistry` first and passes its address into
-`AgentGuardVault`. It does not create an agent or move funds. Save the printed
-addresses as `NEXT_PUBLIC_REGISTRY_CONTRACT_ADDRESS` and
-`NEXT_PUBLIC_VAULT_CONTRACT_ADDRESS` in `.env.local` before wiring the browser
-flow.
-
-5. Put the printed contract address in `.env.local` as `NEXT_PUBLIC_PROBE_CONTRACT_ADDRESS`, restart the app, connect the wallet, switch to Monad Testnet, and write a marker.
-
-Monad Testnet configuration used here: chain ID `10143`, native token `MON`, and public RPC `https://testnet-rpc.monad.xyz`. Confirm current values against the [official Monad testnet documentation](https://docs.monad.xyz/developer-essentials/testnet) before deployment.
-
-## Checks
-
-```bash
-npm run lint
-npm run typecheck
-npm run build
-npm run contracts:compile
-npm run contracts:test
-```
-
-See [docs/BUILD_LOG.md](docs/BUILD_LOG.md) for dated implementation notes, evidence, limitations, and the next slice.
+See [docs/BUILD_LOG.md](docs/BUILD_LOG.md) for dated build notes and test evidence.
