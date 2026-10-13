@@ -6,6 +6,7 @@
   <a href="https://agentshield.munashemudabura.com"><b>Live app</b></a> &nbsp;·&nbsp;
   <a href="https://agentshield.munashemudabura.com/arena"><b>Try to rob our agent (no wallet needed)</b></a> &nbsp;·&nbsp;
   <a href="#try-it-in-60-seconds">60-second tour</a> &nbsp;·&nbsp;
+  <a href="docs/USER_GUIDE.md">User guide &amp; MCP setup</a> &nbsp;·&nbsp;
   <a href="#deployed-contracts-monad-testnet-chain-10143">Contracts</a>
 </p>
 
