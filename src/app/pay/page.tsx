@@ -569,16 +569,23 @@ export default function AgentConsolePage() {
         )}
 
         {!isConnected ? (
-          <Notice tone="info">Connect MetaMask using the agent&apos;s signer account (AgentShield Agent).</Notice>
+          <Notice tone="info">
+            This page is where an agent makes payments. Connect the wallet account you chose as your agent&apos;s signer
+            when you created it on <Link className="underline underline-offset-4" href="/agent">Owner setup</Link>. No agent
+            yet? Create one there in about two minutes, or try the{" "}
+            <Link className="underline underline-offset-4" href="/arena">no-wallet demo agent</Link>.
+          </Notice>
         ) : agentsQuery.isLoading ? (
           <Notice tone="info">Looking up agents that this account signs for…</Notice>
         ) : agentsQuery.error ? (
           <Notice tone="error">Could not read the registry: {describeError(agentsQuery.error)}</Notice>
         ) : agents.length === 0 ? (
           <Notice tone="warning">
-            {shortAddress(address)} is not the signer for any agent. In MetaMask, switch to the AgentShield
-            Agent account for this site. If you are the owner, that is expected: the owner cannot use the
-            agent&apos;s payment path.
+            {shortAddress(address)} is not the signer for any agent yet. Each agent has its own signer account, separate
+            from its owner, so the agent can never change its own rules. To get started:{" "}
+            <Link className="underline underline-offset-4" href="/agent">create an agent on Owner setup</Link> with your owner
+            account and give it a second account as its signer, then switch MetaMask to that second account here. If you
+            are connected as an owner, this is expected: owners set the rules, agents make the payments.
           </Notice>
         ) : (
           <section className="grid gap-5 pb-10 lg:grid-cols-[1.1fr_0.9fr]">

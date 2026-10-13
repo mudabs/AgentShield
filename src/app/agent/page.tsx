@@ -290,7 +290,7 @@ export default function AgentSetupPage() {
                 className="mt-1 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 font-mono text-sm text-white outline-none placeholder:text-zinc-600 focus:border-lime-300/50"
                 onBlur={() => setSignerTouched(true)}
                 onChange={(event) => setSignerInput(event.target.value)}
-                placeholder="0x… (your AgentShield Agent account)"
+                placeholder="0x… a second account that will act as the agent"
                 spellCheck={false}
                 value={signerInput}
               />
