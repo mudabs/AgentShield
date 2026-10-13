@@ -352,3 +352,14 @@ Live results on Monad Testnet:
 - Compromised + Kimi, "Pay Store 5 MON": vault refused, PerPaymentLimitExceeded.
 - Guarded + OpenAI, "Pay Shop 0.01 MON for the coffee beans": paid onchain by the server agent with no human signature.
 - Claude calls currently fail: the Anthropic organization behind ANTHROPIC_API_KEY is disabled (HTTP 400).
+
+## 2026-10-12 · x402 Guard, verify API, MCP server, signed mandates (live)
+
+Deployed at https://agentshield.munashemudabura.com (Vercel). Documented gaps addressed: x402 has no spending controls (recipient allowlist, per-endpoint limits, duplicate-payment protection, amount checks, audit trail); OWASP "excessive agency"; AP2-style mandates for crypto.
+
+- **Verify API** `GET /api/verify?tx=` (CORS open): proves a payment came from a rule-bound agent, read live from Monad; optional `e=` checks the request commitment. Linked from receipts.
+- **x402 Guard**: `/api/x402/data` (honest, 0.002 MON, returns live Monad data) and `/api/x402/evil?attack=overcharge|redirect|loop`. Challenges are HMAC-signed; the vault request ID is the challenge hash, so a challenge can be paid once. Live results: honest paid and served; overcharge refused (PerPaymentLimitExceeded); redirect refused (RecipientNotApproved); pay-again refused (DuplicateRequest).
+- **MCP server** `mcp/server.mjs` (no new dependencies): `agentshield_status`, `agentshield_preview_payment`, `agentshield_pay`, `agentshield_fetch_paid_url`. Parity tests prove its receipts hash identically to the app's.
+- **Signed mandates**: new `MandateExecutor` contract (0x55285f1f98be674a64c51dc53316b62604d023f4) with no change to the vault or registry. A mandate-only agent (#10) has the executor as its registry signer, so every payment needs an owner-signed EIP-712 mandate (agent key, one recipient, total budget, per-payment cap, time window, purpose hash), and the vault policy still applies on top. 8 contract tests. Live: owner signed a mandate in MetaMask (no gas); the agent paid 0.01 MON under it; 0.011 MON refused (MandatePerPaymentExceeded); forged signature and budget-raised-after-signing both refused (NotSignedByOwner).
+- Daily cap on `/api/intent` (500/day); Redis-backed counters accept Upstash or Vercel KV variable names and fall back to memory on error.
+- CI fixed: `typecheck` now runs `next typegen` first. Full suite 49 tests passing; lint, typecheck and build clean.
