@@ -12,6 +12,7 @@ import { describeError } from "@/lib/errors";
 import { findHistoryByHash } from "@/lib/history";
 import { decodeEnvelope, verifyEnvelope, type RequestEnvelope } from "@/lib/receipts";
 import { SiteNav } from "../../site-nav";
+import { BrandMark } from "../../brand-mark";
 
 type Facts = {
   status: "paid" | "reverted";
@@ -151,9 +152,7 @@ export function ReceiptView() {
       <div className="relative mx-auto w-full max-w-3xl px-5 py-6 sm:px-8 lg:py-8">
         <header className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-6">
           <Link className="flex items-center gap-3" href="/">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-lime-300 text-lg font-black text-zinc-950">
-              A
-            </div>
+            <BrandMark />
             <div>
               <p className="text-sm font-semibold tracking-wide text-white">AgentShield</p>
               <p className="text-xs text-zinc-500">Payment receipt</p>

@@ -10,6 +10,7 @@ import { MANDATE_TYPES, mandateDomain, parseMandate, purposeHashOf, serializeMan
 import { parseMonAmount } from "@/lib/amounts";
 import { describeError } from "@/lib/errors";
 import { SiteNav } from "../site-nav";
+import { BrandMark } from "../brand-mark";
 
 type MandateView = StoredMandate & { spentMon: string; remainingMon: string; maxTotalMon: string; maxPerPaymentMon: string; status: string };
 type Overview =
@@ -63,7 +64,7 @@ export default function MandatesPage() {
       <div className="relative mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 lg:px-10 lg:py-8">
         <header className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-6">
           <Link className="flex items-center gap-3" href="/">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-lime-300 text-lg font-black text-zinc-950">A</div>
+            <BrandMark />
             <div>
               <p className="text-sm font-semibold tracking-wide text-white">AgentShield</p>
               <p className="text-xs text-zinc-500">Signed mandates</p>

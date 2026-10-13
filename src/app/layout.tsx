@@ -13,10 +13,20 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const description =
+  "A vault contract on Monad that enforces the owner's rules on every payment an AI agent makes. Try to rob our agent: no wallet needed.";
+
 export const metadata: Metadata = {
-  title: "AgentShield | Guarded agent payments",
-  description:
-    "A trust and security layer for autonomous AI agent payments on Monad.",
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "https://agentshield.munashemudabura.com"),
+  title: "AgentShield | Give your AI agent a wallet, not a blank cheque",
+  description,
+  openGraph: {
+    title: "AgentShield",
+    description,
+    siteName: "AgentShield",
+    type: "website",
+  },
+  twitter: { card: "summary_large_image", title: "AgentShield", description },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

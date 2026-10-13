@@ -6,6 +6,7 @@ import { MONAD_TESTNET_EXPLORER_URL } from "@/lib/monad";
 import type { ArenaEvent } from "@/lib/arena/agent";
 import type { ArenaStats, FeedEntry } from "@/lib/arena/store";
 import { SiteNav } from "../site-nav";
+import { BrandMark } from "../brand-mark";
 
 type Status =
   | { configured: false }
@@ -172,7 +173,7 @@ export default function ArenaPage() {
       <div className="relative mx-auto w-full max-w-6xl px-5 py-6 sm:px-8 lg:px-10 lg:py-8">
         <header className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-6">
           <Link className="flex items-center gap-3" href="/">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-lime-300 text-lg font-black text-zinc-950">A</div>
+            <BrandMark />
             <div>
               <p className="text-sm font-semibold tracking-wide text-white">AgentShield</p>
               <p className="text-xs text-zinc-500">Break the agent</p>
