@@ -6,7 +6,7 @@
   <a href="https://agentshield.munashemudabura.com"><b>Live app</b></a> &nbsp;·&nbsp;
   <a href="https://agentshield.munashemudabura.com/arena"><b>Try to rob our agent (no wallet needed)</b></a> &nbsp;·&nbsp;
   <a href="https://1drv.ms/v/c/0b7e4a9aa62ca320/IQDRfbJI8MOeRbOcMBivv5BaAY967xndRF096iy-xbpDFl8?e=y7A084"><b>Demo video</b></a> &nbsp;·&nbsp;
-  <a href="https://1drv.ms/v/c/0b7e4a9aa62ca320/IQApcP6E7MePRoH6KGpnD0BjAUFSWuQt-Va-047XKtvXkQo?e=iVXNTq"><b>Pitch video</b></a>
+  <a href="https://1drv.ms/v/c/0b7e4a9aa62ca320/IQDX9cO65QiHS7WrJ4ngvj_HAbTdH5DVUjqZrA69mZ0DBQs?e=blRCfF"><b>Pitch video</b></a>
 </p>
 
 <p align="center">
