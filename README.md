@@ -202,6 +202,13 @@ docs/           BUILD_LOG (dated evidence), SUBMISSION
 - x402 here is x402-style: the same 402 request/response shape, settled in native MON through the vault rather than stablecoins through a facilitator.
 - Model names on receipts are declared, not attested.
 
+## License, credits and AI disclosure
+
+- **License:** [MIT](LICENSE).
+- **AI disclosure:** this project was built with AI coding assistants: Claude (Anthropic: Claude Code, Claude app) and Codex / ChatGPT (OpenAI). All output was reviewed, tested and deployed by the author. The product itself uses OpenAI GPT-5 mini and Moonshot Kimi K2.6 to read payment requests.
+- **Prior work:** scaffolded with `create-next-app` on October 8, 2026; everything else was built during the hackathon (October 8 to 13, 2026). OpenZeppelin Contracts are used as libraries.
+- **Credits:** every library, service, AI tool and media tool (including ElevenLabs for the voiceover) is listed in [CREDITS.md](CREDITS.md).
+
 ## Roadmap
 
 - One-wallet onboarding: generate the agent key in the browser so a new user needs only their owner wallet.
