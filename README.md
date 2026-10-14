@@ -5,215 +5,115 @@
 <p align="center">
   <a href="https://agentshield.munashemudabura.com"><b>Live app</b></a> &nbsp;·&nbsp;
   <a href="https://agentshield.munashemudabura.com/arena"><b>Try to rob our agent (no wallet needed)</b></a> &nbsp;·&nbsp;
-  <a href="#try-it-in-60-seconds">60-second tour</a> &nbsp;·&nbsp;
-  <a href="docs/USER_GUIDE.md">User guide &amp; MCP setup</a> &nbsp;·&nbsp;
-  <a href="#deployed-contracts-monad-testnet-chain-10143">Contracts</a>
+  <a href="https://1drv.ms/v/c/0b7e4a9aa62ca320/IQDRfbJI8MOeRbOcMBivv5BaAY967xndRF096iy-xbpDFl8?e=y7A084"><b>Demo video</b></a> &nbsp;·&nbsp;
+  <a href="https://1drv.ms/v/c/0b7e4a9aa62ca320/IQApcP6E7MePRoH6KGpnD0BjAUFSWuQt-Va-047XKtvXkQo?e=iVXNTq"><b>Pitch video</b></a>
 </p>
 
 <p align="center">
-  Built on <b>Monad Testnet</b> for the <b>Monad Metropolis Hackathon</b> &nbsp;|&nbsp; Track: <b>Trust, Identity &amp; AI Infrastructure</b>
+  Monad Metropolis Hackathon &nbsp;|&nbsp; Track 04: Trust, Identity &amp; AI Infrastructure &nbsp;|&nbsp; Built on Monad Testnet &nbsp;|&nbsp; Solo project by Munashe Mudabura
 </p>
 
 ---
 
-## In plain words
+## What it is
 
-AI agents are starting to buy things for people: paying for an API, ordering supplies, settling a bill. To do that they need money, and today that usually means handing the AI a wallet key. If the AI misreads a request, or someone tricks it with a cleverly worded message, it can send the money anywhere.
+AI agents are starting to pay for things on their own. Today that usually means giving the AI a wallet key, and if the AI is tricked or the key leaks, it can send money anywhere.
 
-**AgentShield is like giving your assistant a prepaid card with rules printed on it that the assistant cannot change:**
+**AgentShield gives an AI agent a wallet, not a blank cheque.** The agent's money sits in a vault contract on Monad, and the vault checks the owner's rules on every payment:
 
-- it can only pay the shops you approved,
-- it can only spend so much per purchase and per day,
-- you can freeze it at any moment,
-- and every purchase leaves a receipt that anyone can check.
+- pay only the recipients the owner approved,
+- stay under a per-payment and a daily limit,
+- stop instantly if the owner pauses it,
+- leave a public receipt for every payment.
 
-The difference from a normal card is where the rules live. They live in a **smart contract on the Monad blockchain**, so they are enforced by code that nobody can quietly bend: not the AI, not an attacker, and not even our own website.
+The AI can only *ask* the vault to pay. Even a fully hijacked AI cannot move money the rules don't allow.
 
-## Try it in 60 seconds
+**Who it is for:** developers building AI agents that spend money (shopping agents, API-paying agents, assistants), and the people who own those agents.
 
-No wallet, no sign-up:
+## Try it in 60 seconds (no wallet needed)
 
 1. Open **[agentshield.munashemudabura.com/arena](https://agentshield.munashemudabura.com/arena)**.
-2. Leave **Compromised AI** selected. This makes the AI obey anything you type, as if it had been hacked.
-3. Click the example **Drain the vault** and press **Send to the compromised agent**.
-4. Watch the steps appear: the AI agrees to steal, then the **vault contract refuses it on the blockchain**. Nothing moves.
-5. Now pick **Guarded AI**, click **Honest request** and send it. The agent pays the approved shop by itself, and you get a receipt link.
-6. Scroll down to **x402 Guard** and try the **Overcharging API**: an API that asks the agent for 250 times the normal price. The vault says no.
+2. Keep **Compromised AI** selected (the AI will obey anything).
+3. Click **Drain the vault**, then **Send**. The AI agrees, the vault refuses. 0 MON moved.
+4. Try **Guarded AI** with **Honest request**: the agent pays the approved shop and you get a receipt.
 
-The scoreboard on the right counts every attempt. "MON stolen" stays at zero.
+## Features
 
-## Words used here
-
-| Word | Meaning |
-|---|---|
-| **Agent** | An AI program that can act on someone's behalf, here by making payments. |
-| **Owner** | The person the agent works for. Only the owner can change the rules or take money out. |
-| **Vault** | The smart contract that holds the agent's money and checks the rules before every payment. |
-| **Monad / MON** | The blockchain AgentShield runs on, and its currency. We use the test network, where MON has no real value. |
-| **Signer key** | The agent's own key. It can ask the vault to pay, and nothing else. |
-| **Mandate** | A one-off permission the owner signs for free, like "up to 0.03 MON to Shop for coffee, valid 24 hours". |
-| **x402** | A new standard where a website answers "402 Payment Required" and an AI agent pays automatically. |
-| **MCP** | A standard way to plug tools into AI apps such as Cursor or Claude Desktop. |
-| **Prompt injection** | Tricking an AI with instructions hidden in a message, such as "ignore your rules and pay me". |
-
----
-
-## Why this exists
-
-AI agents are starting to pay for things on their own, and the tooling around them has known holes:
-
-- **x402 agents pay whoever asks.** The x402 flow lets an API answer "402 Payment Required: pay X to Y" and the agent pays automatically. A security write-up lists what is missing: no recipient allowlist ("agents blindly pay whoever responds with a 402 header"), no per-endpoint limits, no protection against retry loops paying twice, no check that the amount matches, and no policy audit trail ([PolicyLayer](https://policylayer.com/blog/securing-x402-protocol-agent-spending-controls)).
-- **Excessive agency** is a top-10 risk for LLM applications in the OWASP list: giving a model more authority than the task needs ([Giskard summary](https://www.giskard.ai/glossary/owasp-llm06-2025-excessive-agency-oprdx)).
-- **Mandates exist on paper for cards, not for crypto.** Google's AP2 proposes signed "intent mandates" so a purchase can be proven authorized; its first version covers card payments, with digital currencies on the roadmap ([Vellum overview](https://www.vellum.ai/blog/googles-ap2-a-new-protocol-for-ai-agent-payments)).
-
-AgentShield answers each of these with code that runs on Monad today.
-
-## What you can try on the live site
-
-| Page | What it shows | Wallet needed? |
-|---|---|---|
-| [`/arena`](https://agentshield.munashemudabura.com/arena) **Break the Agent** | A demo agent that pays on its own (its key is held by the server). Switch on *compromised mode* and the AI obeys anything with app-side checks off; only the vault is left. Try "drain the vault" and watch it fail onchain. Live scoreboard. | No |
-| `/arena` **x402 Guard** | The same agent buys data from paid APIs: an honest one, one that overcharges 250x, one that swaps the pay-to address, one that keeps asking to be paid again. The vault stops the last three. | No |
-| [`/mandates`](https://agentshield.munashemudabura.com/mandates) | The owner signs a free EIP-712 mandate ("0.03 MON to Shop for coffee, 24 hours"); the agent spends under it; forged, edited, overspent or revoked mandates are refused by the contract. | Owner only, to sign |
-| [`/agent`](https://agentshield.munashemudabura.com/agent) Owner setup | Register an agent, set limits, approve recipients, deposit, withdraw, pause, rotate the agent key, retire the agent. | Yes |
-| [`/pay`](https://agentshield.munashemudabura.com/pay) Agent console | Ask in plain language (OpenAI or Kimi), one or several payments per sentence, preview against the vault, send, keep a history. | Yes (agent account) |
-| `/receipt/<tx>` | A public receipt read straight from Monad, with the request details verified against the onchain commitment. | No |
-| [`/api/verify?tx=`](https://agentshield.munashemudabura.com/api/verify?tx=0x74c7bd3535ba8c29f1a76233456bfa409fdce39e28e1e823d5b32cee8a2dd251) | Machine-readable proof for merchants that a payment came from a rule-bound agent. | No |
+- **Owner setup:** register an agent with its own key, set limits, approve recipients, deposit, withdraw, pause, rotate the key.
+- **Plain-language payments:** "pay Shop 0.005 MON for coffee"; an AI turns it into a payment, the vault decides.
+- **Signed mandates:** the owner signs a free one-off permission (one recipient, one budget, one time window).
+- **x402 Guard:** agents paying for APIs are protected from overcharging, redirected payments and double charges.
+- **Break the Agent:** a public challenge where anyone can attack a live agent.
+- **Receipts and Verify API:** anyone can check a payment, and merchants can verify it with one call.
+- **MCP server:** any AI app (Claude, Codex, Cursor, VS Code) can use the same vault and rules.
 
 ## How it works
 
 ```text
-"Pay Shop 0.02 for milk and Store 0.03 for bread"
-        │
-        ▼
-  AI model (OpenAI / Kimi)  ── sees contact NAMES only, never addresses or keys
-        │  JSON proposal
-        ▼
-  AgentShield checks        ── known names or addresses the user typed; strict amounts; max 5 payments
-        │  request ID = keccak256(recipient, amount, prompt, model, salt)
-        ▼
-  AgentGuardVault (Monad)   ── signer? approved recipient? per-payment cap? daily cap? paused? balance? replay?
-        │
-        ├─ pays and emits PaymentExecuted ──► public receipt + /api/verify
-        └─ reverts, nothing moves
+You: "Pay Shop 0.005 MON for coffee"
+   -> AI model reads it and proposes a payment (it never sees keys)
+   -> AgentShield app checks the proposal
+   -> Vault contract on Monad checks every rule
+   -> paid, with a public receipt   OR   refused, nothing moves
 ```
 
-Optional layers on top of the same vault:
+## How it uses Monad
 
-- **MandateExecutor**: an agent whose registry signer is this contract can only pay under an owner-signed mandate (one recipient, total budget, per-payment cap, time window, purpose hash). The vault policy still applies on top.
-- **x402 Guard**: the vault request ID is the hash of the API's signed 402 challenge, so each challenge can be paid at most once and the server can check the payment answers exactly its challenge.
+- **All the rules live onchain.** Three Solidity contracts on Monad Testnet hold the money and enforce the policy, so neither the AI, an attacker, nor our own website can bend them.
+- **Fast and cheap enough for agents.** Monad's quick blocks and low fees let an agent make many small payments and get a confirmed result in about a second, which is what an agent paying per API call needs.
+- **EVM compatible.** Standard Solidity, OpenZeppelin and viem work unchanged, so other projects can plug in easily.
 
-## Deployed contracts (Monad Testnet, chain 10143)
-
-| Contract | Address |
+| Contract (Monad Testnet, chain 10143) | Address |
 |---|---|
 | AgentRegistry | [`0x7a9131100dd823af635f68f1223a0cadfdf5d71a`](https://testnet.monadvision.com/address/0x7a9131100dd823af635f68f1223a0cadfdf5d71a) |
 | AgentGuardVault | [`0xbdbb2b644d79ac3f5a5282e52050e9b5e563a202`](https://testnet.monadvision.com/address/0xbdbb2b644d79ac3f5a5282e52050e9b5e563a202) |
 | MandateExecutor | [`0x55285f1f98be674a64c51dc53316b62604d023f4`](https://testnet.monadvision.com/address/0x55285f1f98be674a64c51dc53316b62604d023f4) |
 
-Demo agents: #9 (the public Break the Agent agent: 0.01 MON per payment, 0.05 per day, Shop and Store only) and #10 (mandate-only agent).
+Example payment: [receipt](https://agentshield.munashemudabura.com/api/verify?tx=0x74c7bd3535ba8c29f1a76233456bfa409fdce39e28e1e823d5b32cee8a2dd251) for transaction `0x74c7bd35…2dd251`.
 
-## Security model
+## Tech stack
 
-**Enforced by contracts, whatever the AI or the web app does:**
-- The agent key can only call `executePayment`. It cannot withdraw, change limits, approve recipients or unpause.
-- Payments go only to owner-approved recipients, within per-payment and per-UTC-day limits, from the agent's own vault balance.
-- Every request ID can be used once.
-- The owner can pause, rotate the agent key, or deactivate the agent in one transaction.
-- Mandate agents additionally need a valid owner signature, inside its window, within its budget and per-payment cap, not revoked.
+Solidity 0.8.28 + OpenZeppelin, Hardhat 3, Next.js 16 + React 19, Tailwind CSS 4, wagmi + viem, Upstash Redis, Vercel, OpenAI GPT-5 mini and Moonshot Kimi K2.6 for reading requests, and a dependency-free MCP server in Node.js.
 
-**Checked by the app, as defence in depth (and switched off in the arena's compromised mode to prove the point):** the model only sees contact names; it may not invent an address; amounts are parsed strictly; a multi-payment request is all or nothing.
+## Run it yourself
 
-**Commitments, not attestations:** a receipt proves the prompt, model name, recipient and amount were fixed when the payment was signed. The model name is declared by our server, not signed by the model provider.
-
-**Keys:** the owner key never leaves the owner's wallet or local `.env`. The public demo agent's testnet key lives in server environment variables; by design its worst case is bounded by the vault policy (0.05 MON a day to our own addresses) plus its small gas wallet. AI provider keys are server-only, with per-caller rate limits and daily caps.
-
-## Use it from your own agent
-
-**Any AI app, through MCP.** [`mcp/server.mjs`](mcp/README.md) gives Cursor, VS Code agents, Claude Desktop and other MCP clients four tools: `agentshield_status`, `agentshield_preview_payment`, `agentshield_pay` and `agentshield_fetch_paid_url` (pays x402-style APIs through the vault). No dependencies beyond viem. See [mcp/README.md](mcp/README.md).
-
-**Any code, directly.** The vault does not care what software calls it:
-
-```ts
-import { createWalletClient, http, keccak256, parseEther, toHex } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
-
-const agent = createWalletClient({ account: privateKeyToAccount(AGENT_KEY), chain: monadTestnet, transport: http() });
-await agent.writeContract({
-  address: VAULT, abi: vaultAbi, functionName: "executePayment",
-  args: [AGENT_ID, keccak256(toHex(crypto.getRandomValues(new Uint8Array(32)))), SHOP, parseEther("0.01")],
-});
-// Reverts with RecipientNotApproved, PerPaymentLimitExceeded, DailyLimitExceeded, AgentPaused, ... if the policy says no.
-```
-
-**Merchants:** `GET /api/verify?tx=0x…` returns the agent, its owner, the policy version that applied and a plain-language explanation. CORS is open.
-
-## Run it locally
-
-Requirements: Node.js 22, npm, MetaMask with Monad Testnet, test MON from [faucet.monad.xyz](https://faucet.monad.xyz).
+You need Node.js 22, npm, MetaMask on Monad Testnet, and test MON from [faucet.monad.xyz](https://faucet.monad.xyz).
 
 ```bash
+git clone https://github.com/mudabs/AgentShield.git
+cd AgentShield
 npm install
-cp .env.example .env      # then fill in the values (see below)
-npm run dev               # http://localhost:3000
+cp .env.example .env     # fill in the values described in .env.example
+npm run dev              # open http://localhost:3000
+npm run contracts:test   # run the contract and unit tests
 ```
 
-| Script | What it does |
-|---|---|
-| `npm run contracts:test` | Contract and unit tests (49) |
-| `npm run contracts:deploy:guarded:testnet` | Deploy AgentRegistry and AgentGuardVault |
-| `npm run demo:setup` | Create the server-held demo agent: key, registration, limits, approvals, deposit, gas |
-| `npm run mandates:setup` | Deploy MandateExecutor and a mandate-only agent |
-| `npm run e2e` | End-to-end checks against the live testnet (42 checks) |
-| `npm run mcp:smoke` | Start the MCP server with the demo agent and call its tools |
+Full setup, deployment, environment variables, security model and architecture: **[docs/TECHNICAL.md](docs/TECHNICAL.md)**. App and MCP walkthrough: **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)**.
 
-### Environment variables
+---
 
-| Scope | Variables |
-|---|---|
-| Public (browser) | `NEXT_PUBLIC_MONAD_RPC_URL`, `NEXT_PUBLIC_REGISTRY_CONTRACT_ADDRESS`, `NEXT_PUBLIC_VAULT_CONTRACT_ADDRESS`, `NEXT_PUBLIC_MANDATE_EXECUTOR_ADDRESS` |
-| Server only | `MONAD_TESTNET_RPC_URL`, `OPENAI_API_KEY` and/or `KIMI_API_KEY`, `DEMO_AGENT_PRIVATE_KEY`, `DEMO_AGENT_ID`, `DEMO_ADDRESS_BOOK`, `MANDATE_AGENT_ID`, Redis (`KV_REST_API_URL` + `KV_REST_API_TOKEN` from Vercel's Upstash integration, or `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`) |
-| Optional | `INTENT_RATE_LIMIT_PER_MINUTE`, `INTENT_DAILY_LIMIT`, `ARENA_RATE_LIMIT_PER_MINUTE`, `ARENA_DAILY_ATTEMPTS`, `X402_SECRET`, `X402_PAY_TO` |
-| Never on a server | `PRIVATE_KEY` (owner), `E2E_AGENT_PRIVATE_KEY`, `E2E_SHOP_PRIVATE_KEY` |
+## License
 
-Keys exported from MetaMask without the `0x` prefix are accepted. Without Redis, scoreboard counts and signed mandates live in memory and reset on restart.
+MIT. See [LICENSE](LICENSE).
 
-### Deploying
+## AI disclosure
 
-The repo deploys to Vercel as-is ([`vercel.json`](vercel.json)); GitHub CI runs lint, typecheck, contract tests and the production build on every push ([`ci.yml`](.github/workflows/ci.yml)). Add the variables above in Vercel → Settings → Environment Variables, scope secrets to Production, and connect Upstash Redis from the Storage tab (free plan).
+This project was built with AI coding assistants: **Claude** (Anthropic: Claude Code, Claude app, Claude Desktop) and **Codex / ChatGPT** (OpenAI). They helped write and review code, contracts, tests, scripts, documentation and the demo video scripts. All output was reviewed, tested and deployed by the author. The demo video voiceover was generated with **ElevenLabs** from the author's own voice.
 
-## Repository layout
+## Prior work and build window
 
-```text
-contracts/      AgentRegistry, AgentGuardVault, MandateExecutor (+ test helper)
-src/app/        Pages: home, agent, pay, book, arena, mandates, receipt; API routes under api/
-src/lib/        guard (ABIs/addresses), ai/ (providers, intent validation), receipts, history,
-                arena/ (demo agent, x402 client, scoreboard), x402/, mandates, verify
-mcp/            Dependency-free MCP server
-scripts/        Deploy and setup scripts, e2e, MCP smoke test
-test/           Contract tests (Hardhat + viem) and unit tests (node:test)
-docs/           BUILD_LOG (dated evidence), SUBMISSION
-```
+The project was scaffolded with `create-next-app` on October 8, 2026. Everything else (contracts, app, API, MCP server, scripts, tests, docs) was built during the hackathon, October 8 to 13, 2026. OpenZeppelin Contracts are used as libraries, not copied.
 
-## Honest limits
+## Acknowledgments
 
-- Testnet only; test MON has no value.
-- In the agent console a person clicks Send as the agent; the arena and mandates pages show the same rules with a server-held agent key and no human in the loop.
-- x402 here is x402-style: the same 402 request/response shape, settled in native MON through the vault rather than stablecoins through a facilitator.
-- Model names on receipts are declared, not attested.
+**Open-source libraries:** Next.js (MIT), React (MIT), wagmi (MIT), viem (MIT), TanStack Query (MIT), OpenZeppelin Contracts (MIT), Hardhat and hardhat-toolbox-viem (MIT), Solidity compiler (GPL-3.0, build tool only), Tailwind CSS (MIT), TypeScript (Apache-2.0), ESLint and typescript-eslint (MIT), Chai (MIT), dotenv (BSD-2-Clause), Geist font (SIL OFL 1.1), Model Context Protocol specification (MIT).
 
-## License, credits and AI disclosure
+**AI models in the product:** OpenAI GPT-5 mini, Moonshot AI Kimi K2.6 (Anthropic Claude supported in code, off in the live app).
 
-- **License:** [MIT](LICENSE).
-- **AI disclosure:** this project was built with AI coding assistants: Claude (Anthropic: Claude Code, Claude app) and Codex / ChatGPT (OpenAI). All output was reviewed, tested and deployed by the author. The product itself uses OpenAI GPT-5 mini and Moonshot Kimi K2.6 to read payment requests.
-- **Prior work:** scaffolded with `create-next-app` on October 8, 2026; everything else was built during the hackathon (October 8 to 13, 2026). OpenZeppelin Contracts are used as libraries.
-- **Credits:** every library, service, AI tool and media tool (including ElevenLabs for the voiceover) is listed in [CREDITS.md](CREDITS.md).
+**Services:** Monad Testnet and its public RPC and explorer, Vercel (hosting), Upstash Redis (storage), MetaMask (wallet), GitHub (code and CI).
 
-## Roadmap
+**Video, voice and images:** ElevenLabs (voiceover), HyperFrames (intro and launch videos), Kokoro TTS (draft narration), MusicGen by Meta (music bed), Puppeteer and Google Chrome (screen recording), FFmpeg (editing), Clipchamp and OBS Studio (editing and webcam), OneDrive (video hosting). The logo, favicon and banner were drawn in code with Claude.
 
-- One-wallet onboarding: generate the agent key in the browser so a new user needs only their owner wallet.
-- Stablecoin vaults and a standard x402 facilitator integration.
-- Escalation instead of refusal: payments over a limit wait for owner approval.
-- Agent identity and reputation via [ERC-8004](https://github.com/erc-8004/erc-8004-contracts) registries, with vault outcomes as reputation signals.
+**Ideas and standards we build on:** EIP-712 typed signatures, the x402 payment pattern (Coinbase), Google's AP2 mandates, ERC-8004 agent identity, and OWASP's "Excessive Agency" guidance for LLM apps.
 
-See [docs/BUILD_LOG.md](docs/BUILD_LOG.md) for dated build notes and test evidence.
+**Trademarks:** Monad and Monad Metropolis names and logos belong to the Monad Foundation and are used only to show participation in the hackathon. Claude is a trademark of Anthropic; OpenAI, ChatGPT, Codex and GPT of OpenAI; Kimi of Moonshot AI; other names belong to their owners. No endorsement is implied.
